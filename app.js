@@ -341,6 +341,7 @@
       ['findings', 'Validate findings', actionable.length], ['audits', 'Consistency audits'], ['references', 'References', (R.references && R.references.summary && R.references.summary.checked) || 0],
       ['roadmap', 'Revision roadmap'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
     ];
+    if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -369,6 +370,7 @@
       <section class="tab-panel" data-panel="findings" hidden>${viewFindingsShell(actionable)}</section>
       <section class="tab-panel" data-panel="audits" hidden>${viewAudits(R)}</section>
       <section class="tab-panel" data-panel="references" hidden>${viewReferences(R)}</section>
+      ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
       <section class="tab-panel" data-panel="checks" hidden>${viewChecksShell(findings)}</section>`;
@@ -556,6 +558,56 @@
       + `<script type="application/json" id="refData">${esc(JSON.stringify(results.map(r => Object.assign({}, r, { tone: tone(r.status) }))))}</script>`;
   }
 
+  // ---------- ORIGINALITY & AI-WRITING ----------
+  function viewOriginality(IG) {
+    const fs = IG.free_screen || {}, sr = IG.style_review || {}, cl = IG.copyleaks || {};
+    const sim = cl.similarity, ai = cl.ai;
+    const pctTone = v => v === null || v === undefined ? '' : v > 25 ? 'critical' : v > 15 ? 'major' : '';
+    let h = '';
+    if (cl.enabled && sim) {
+      h += `<div class="card"><div class="card-head"><h2>Similarity check</h2><small>Copyleaks</small></div>
+        ${sim.overall_pct !== null && sim.overall_pct !== undefined ? `<div class="stats">
+          <div class="stat ${pctTone(sim.overall_pct)}"><div class="n">${esc(sim.overall_pct)}%</div><div class="l">Overall similarity</div></div>
+          <div class="stat"><div class="n">${esc(sim.identical_pct ?? '—')}%</div><div class="l">Identical</div></div>
+          <div class="stat"><div class="n">${esc(sim.minor_changes_pct ?? '—')}%</div><div class="l">Minor changes</div></div>
+          <div class="stat"><div class="n">${esc(sim.paraphrased_pct ?? '—')}%</div><div class="l">Paraphrased</div></div>
+          <div class="stat"><div class="n">${esc(sim.sources_total || 0)}</div><div class="l">Sources</div></div>
+        </div>${sim.report_pdf ? `<p style="margin:12px 0 0"><a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="${esc(sim.report_pdf)}">Open Copyleaks PDF report</a></p>` : ''}` : `<p class="muted">${esc(sim.message || sim.status)}</p>`}
+        ${arr(sim.sources).length ? arr(sim.sources).slice(0, 12).map(s => `<div class="comment"><b>${esc(s.title || s.url || 'Source')}</b> <span class="tag">${esc(s.type)}</span> <span class="tag ${s.pct > 5 ? 'bad' : ''}">${esc(s.pct ?? '?')}% · ${esc(s.matched_words)} words</span>
+          ${s.url ? `<div class="sources"><a target="_blank" rel="noopener" href="${esc(s.url)}">${esc(s.url)}</a></div>` : ''}
+          ${arr(s.passages).slice(0, 3).map(p => `<blockquote class="ev"><span class="loc">${esc(p.location || '')} · ${esc(p.type)}</span>${esc(p.manuscript_text)}</blockquote>`).join('')}</div>`).join('') : ''}
+      </div>`;
+      if (ai) h += `<div class="card"><div class="card-head"><h2>AI-writing detector</h2><small>Copyleaks · statistical signal, not proof</small></div>
+        ${ai.status === 'error' ? `<p class="muted">${esc(arr(ai.errors).join(' '))}</p>` : `<div class="stats"><div class="stat"><div class="n">${esc(Math.round((ai.ai_share || 0) * 100))}%</div><div class="l">Text classified as AI-like</div></div><div class="stat"><div class="n">${esc(ai.words_scanned || 0)}</div><div class="l">Words scanned</div></div></div>
+        ${arr(ai.passages).slice(0, 12).map(p => `<blockquote class="ev"><span class="loc">${esc(p.location || '')}</span>${esc(p.text)}</blockquote>`).join('')}`}
+        <p class="muted" style="font-size:13.5px;margin-bottom:0">Detectors often misclassify text by non-native English writers and formulaic methods sections. Use this to decide where to revise wording, never as evidence of misconduct.</p></div>`;
+    } else {
+      h += `<div class="card" style="margin-bottom:16px"><p style="margin:0"><b>Full similarity check not run.</b> This review used the free screens below. For a Turnitin-style similarity percentage, run iThenticate/Turnitin — or DrillBit through your university library (INFLIBNET ShodhShuddhi) — before submitting. The site owner can also enable Copyleaks.</p></div>`;
+    }
+    h += `<div class="card"><div class="card-head"><h2>Open-access overlap screen</h2><small>free · sample-based</small></div>
+      <div class="stats">
+        <div class="stat ${fs.matched ? 'major' : ''}"><div class="n">${esc(fs.matched || 0)} / ${esc(fs.sampled || 0)}</div><div class="l">Sampled sentences found verbatim in published works</div></div>
+        <div class="stat"><div class="n">${esc(fs.own_work_matches || 0)}</div><div class="l">Matches to what looks like your own earlier version</div></div>
+      </div>
+      <p class="muted" style="font-size:13.5px">Searched as exact phrases in ${esc(arr(fs.engines).join(' and ') || 'open databases')}.${fs.note ? ' ' + esc(fs.note) : ''}</p>
+      ${arr(fs.sources).length ? arr(fs.sources).map(s => `<div class="comment"><b>${esc(s.title)}</b>${s.year ? ` (${esc(s.year)})` : ''} ${s.own_work_suspected ? '<span class="tag">likely your own work</span>' : '<span class="tag bad">other authors</span>'} <span class="tag">${esc(s.matched_sentences)} sentence${s.matched_sentences === 1 ? '' : 's'}</span>
+        <div class="sources">${esc(s.authors || '')}${s.venue ? ' · ' + esc(s.venue) : ''}${s.url ? ` · <a target="_blank" rel="noopener" href="${esc(s.url)}">${esc(s.doi || s.url)}</a>` : ''}</div>
+        ${arr(s.hits).slice(0, 3).map(x => `<blockquote class="ev"><span class="loc">${esc(x.location || '')}</span>${esc(x.manuscript_text)}</blockquote>`).join('')}
+        <div class="action"><b>Action:</b> ${s.own_work_suspected ? 'If this is your own preprint or thesis, disclose it in the cover letter and check the journal’s prior-publication policy.' : 'Rewrite in your own words or quote and cite the source.'}</div></div>`).join('') : `<p style="margin:0">${fs.status === 'complete' ? 'No verbatim overlap found in the sampled sentences.' : esc(fs.status || 'Not run')}</p>`}
+    </div>`;
+    h += `<div class="card"><div class="card-head"><h2>Writing-authenticity review</h2><small>no AI score</small></div>
+      <p>${esc(sr.overall_note || (sr.status === 'disabled' ? 'Disabled.' : 'Not available.'))}</p>
+      <dl class="kv"><dt>AI-use disclosure</dt><dd>${sr.disclosure_statement_found ? '<span class="yes">Found</span>' + (sr.disclosure_quote ? ` — <i>“${esc(sr.disclosure_quote)}”</i>` : '') : '<span class="no">Not found</span>'}${sr.disclosure_advice ? `<br><span class="muted">${esc(sr.disclosure_advice)}</span>` : ''}</dd>
+      ${sr.style_shift_detected ? `<dt>Style shift</dt><dd>${esc(sr.style_shift_note)}</dd>` : ''}</dl>
+      ${arr(sr.passages).map(x => `<div class="comment"><span class="tag">${esc(String(x.pattern || '').replace(/_/g, ' '))}</span>${x.quote_verified ? '' : ' <span class="tag warn">quote not verified</span>'}
+        <blockquote class="ev"><span class="loc">${esc(x.location || '')}</span>${esc(x.quote)}</blockquote>
+        ${x.why_it_matters ? `<p class="muted" style="margin:4px 0;font-size:14px">${esc(x.why_it_matters)}</p>` : ''}
+        ${x.suggestion ? `<div class="action"><b>Suggestion:</b> ${esc(x.suggestion)}</div>` : ''}</div>`).join('')}
+    </div>`;
+    h += `<div class="card"><h3>Limits of these checks</h3><ul class="clean">${arr(IG.caveats).map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
+    return h;
+  }
+
   function viewRoadmap(S, id) {
     const RM = S.revision_roadmap || {};
     const groups = [['priority_1_must_fix', 'Priority 1 — Must fix', 'CRITICAL'], ['priority_2_substantive', 'Priority 2 — Substantive revision', 'MAJOR'], ['priority_3_strengthening', 'Priority 3 — Strengthening', 'MINOR'], ['priority_4_editorial', 'Priority 4 — Editorial', 'INFO']];
@@ -629,10 +681,11 @@
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
+          <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude Opus writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
           <li><div><b>You decide</b><span>Confirm, modify or reject each finding, tick off the roadmap, and export your validated list.</span></div></li>
         </ol>
-        <div class="card" style="margin-top:22px"><h3>Privacy</h3><p style="margin:0">Manuscript text is sent to Google Gemini and Anthropic Claude through your own n8n server and stored there (status table, Google Drive report). This site is static: it stores nothing except your access key, review list and validation notes in your own browser. Do not upload manuscripts you received in confidence as a journal reviewer.</p></div>
+        <div class="card" style="margin-top:22px"><h3>Privacy</h3><p style="margin:0">Manuscript text is sent to Google Gemini and Anthropic Claude through your own n8n server, and short sampled phrases are searched in OpenAlex and Europe PMC and stored there (status table, Google Drive report). This site is static: it stores nothing except your access key, review list and validation notes in your own browser. Do not upload manuscripts you received in confidence as a journal reviewer.</p></div>
       </div>`;
   }
 
