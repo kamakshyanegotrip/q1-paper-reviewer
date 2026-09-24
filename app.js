@@ -48,7 +48,7 @@
   const csvCell = v => '"' + String(v === undefined || v === null ? '' : v).replace(/"/g, '""').replace(/\r?\n/g, ' ') + '"';
   const READINESS = {
     READY: 'Ready to submit', READY_AFTER_MINOR_REVISION: 'Ready after minor revision',
-    SUBSTANTIVE_REVISION_NEEDED: 'Substantive revision needed', NOT_READY: 'Not ready for submission', UNDETERMINED: 'Not determined'
+    SUBSTANTIVE_REVISION_NEEDED: 'Substantive revision needed', NOT_READY: 'Not ready for submission', UNDETERMINED: 'Not determined', ORIGINALITY_ONLY: 'Originality check done'
   };
   const RATING_W = { Strong: 90, Moderate: 62, Weak: 32, Unclear: 10 };
   const STAGES = [
@@ -58,9 +58,17 @@
     ['cross_validation', 'Evidence validation & cross-document consistency audit', 55],
     ['reference_check', 'Reference verification on Crossref', 65],
     ['adjudication', 'Adjudication of findings', 75],
+    ['originality', 'Originality & writing-authenticity screen', 80],
     ['synthesis', 'Q1 synthesis report', 85],
     ['done', 'Report ready', 100]
   ];
+  const STAGES_ORIG = [
+    ['received', 'Manuscript received', 5],
+    ['classifying', 'Text extraction', 15],
+    ['originality', 'Open-access phrase search & writing-authenticity review', 80],
+    ['done', 'Originality report ready', 100]
+  ];
+  let curStages = STAGES;
 
   let pollTimer = null;
   function stopPolling() { if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; } }
@@ -165,11 +173,12 @@
             </select></label>
           <label class="field"><span>Research field</span><input type="text" name="field" value="Tourism & Hospitality"></label>
         </div>
-        <div class="field" style="margin-bottom:6px"><span>Review depth</span></div>
+        <div class="field" style="margin-bottom:6px"><span>Review type</span></div>
         <div class="modes">
           <div class="mode"><input type="radio" name="review_mode" id="m1" value="QUICK"><label for="m1"><b>Quick</b><span>~40 core checks · 15 refs · fastest</span></label></div>
           <div class="mode"><input type="radio" name="review_mode" id="m2" value="FULL_Q1" checked><label for="m2"><b>Full Q1</b><span>~90–120 checks · 40 refs · recommended</span></label></div>
           <div class="mode"><input type="radio" name="review_mode" id="m3" value="FORENSIC"><label for="m3"><b>Forensic</b><span>All checks · 80 refs · deepest</span></label></div>
+          <div class="mode"><input type="radio" name="review_mode" id="m4" value="ORIGINALITY"><label for="m4"><b>Originality only</b><span>Copying & AI-writing screen · ~2–4 min · cheapest</span></label></div>
         </div>
         <details class="more">
           <summary>Journal guidelines, notes & email (optional)</summary>
@@ -259,15 +268,17 @@
       $('#k').addEventListener('click', () => openSettings()); return;
     }
     const entry = history.all().find(r => r.id === id) || {};
+    const origOnly = entry.mode === 'ORIGINALITY';
+    curStages = origOnly ? STAGES_ORIG : STAGES;
     app.innerHTML = `
       <div class="card progress-wrap" id="progressCard">
-        <div class="eyebrow">Review in progress</div>
+        <div class="eyebrow">${origOnly ? 'Originality check in progress' : 'Review in progress'}</div>
         <h2 id="pTitle">${esc(entry.title || id)}</h2>
         <p class="muted" style="margin:0">${esc(entry.journal || '')}${entry.journal ? ' · ' : ''}<span class="mono">${esc(id)}</span></p>
         <div class="bar"><div id="pBar" style="width:3%"></div></div>
         <p class="status-msg" id="pMsg">Connecting…</p>
         <ol class="steps" id="pSteps"></ol>
-        <p class="progress-note" style="margin-top:18px">A full review usually takes 10–20 minutes. You can close this tab — the review keeps running, and it will be in <a href="#/reviews">My reviews</a> when you return.</p>
+        <p class="progress-note" style="margin-top:18px">${origOnly ? 'An originality check usually takes 2–4 minutes.' : 'A full review usually takes 10–20 minutes.'} You can close this tab — the review keeps running, and it will be in <a href="#/reviews">My reviews</a> when you return.</p>
       </div>`;
     let notFound = 0;
     const tick = async () => {
@@ -308,9 +319,9 @@
     tick();
   }
   function drawSteps(stage, progress, failed) {
-    const idx = Math.max(0, STAGES.findIndex(s => s[0] === stage));
-    const cur = stage === 'error' ? STAGES.findIndex(s => s[2] > (progress || 0)) : idx;
-    $('#pSteps').innerHTML = STAGES.map((s, i) => {
+    const idx = Math.max(0, curStages.findIndex(s => s[0] === stage));
+    const cur = stage === 'error' ? curStages.findIndex(s => s[2] > (progress || 0)) : idx;
+    $('#pSteps').innerHTML = curStages.map((s, i) => {
       const cls = i < cur || (s[0] === 'done' && stage === 'done') ? 'done' : (i === cur && !failed ? 'current' : '');
       return `<li class="${cls}"><span class="dot">${cls === 'done' ? '✓' : ''}</span><span>${esc(s[1])}</span></li>`;
     }).join('');
@@ -329,6 +340,7 @@
   // ---------- REPORT ----------
   function renderReport(R, opts) {
     const id = opts.id;
+    if ((R.meta || {}).mode === 'ORIGINALITY') return renderOriginalityReport(R, opts);
     const S = R.synthesis || {};
     const M = R.meta || {};
     const sev = R.severity_counts || {};
@@ -558,6 +570,33 @@
       + `<script type="application/json" id="refData">${esc(JSON.stringify(results.map(r => Object.assign({}, r, { tone: tone(r.status) }))))}</script>`;
   }
 
+  function renderOriginalityReport(R, opts) {
+    const id = opts.id, M = R.meta || {}, IG = R.integrity || {};
+    app.innerHTML = `
+      <div class="draft-banner"><b>Originality-only check.</b> This screens for copied passages and generic, AI-sounding wording. It is not a full review — run Quick, Full Q1 or Forensic for the complete pre-submission assessment.</div>
+      ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
+      <div class="report-head">
+        <div>
+          <div class="eyebrow">Originality & AI-writing screen</div>
+          <h1>${esc(M.title || id)}</h1>
+          <div class="report-meta">
+            ${M.target_journal ? `<span>Target: <b>${esc(M.target_journal)}</b></span>` : ''}<span>${esc(M.word_count || '?')} words${M.ocr_used ? ' · OCR' : ''}</span>
+            <span class="mono">${esc(R.review_id || id)}</span><span>${esc(fmtDate(R.generated_at))}</span>
+          </div>
+        </div>
+        <div class="report-actions">
+          <a class="btn btn-ghost btn-sm" href="#/">Run a full review</a>
+          <button class="btn btn-ghost btn-sm" id="exportJson">Download JSON</button>
+          <button class="btn btn-ghost btn-sm" id="printBtn">Print / PDF</button>
+          ${opts.demo ? '' : '<button class="btn btn-ghost btn-sm" id="refreshBtn" title="Reload the result from the server">Refresh</button>'}
+        </div>
+      </div>
+      <section class="tab-panel" style="margin-top:18px">${viewOriginality(IG)}</section>`;
+    $('#printBtn').addEventListener('click', () => window.print());
+    $('#exportJson').addEventListener('click', () => download((R.review_id || id) + '.json', JSON.stringify(R, null, 2), 'application/json'));
+    const rf = $('#refreshBtn'); if (rf) rf.addEventListener('click', () => { store.del('result:' + id); renderReview(id); });
+  }
+
   // ---------- ORIGINALITY & AI-WRITING ----------
   function viewOriginality(IG) {
     const fs = IG.free_screen || {}, sr = IG.style_review || {}, cl = IG.copyleaks || {};
@@ -681,7 +720,7 @@
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
-          <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector.</span></div></li>
+          <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude Opus writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
           <li><div><b>You decide</b><span>Confirm, modify or reject each finding, tick off the roadmap, and export your validated list.</span></div></li>
         </ol>

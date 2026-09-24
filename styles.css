@@ -166,8 +166,9 @@ input:focus, select:focus, textarea:focus, .btn:focus-visible, .dropzone:focus-v
 .file-chip .ext { display: grid; place-items: center; width: 44px; height: 52px; border-radius: 8px; background: var(--brand); color: #fff; font: 700 12px var(--sans); text-transform: uppercase; }
 @media (prefers-color-scheme: dark) { .file-chip .ext { color: #0f1520; } }
 
-.modes { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 16px; }
-@media (max-width: 620px) { .modes { grid-template-columns: 1fr; } }
+.modes { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 16px; }
+@media (max-width: 900px) { .modes { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 520px) { .modes { grid-template-columns: 1fr; } }
 .mode input { position: absolute; opacity: 0; pointer-events: none; }
 .mode label { display: block; height: 100%; padding: 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; }
 .mode label b { display: block; font-size: 14px; }
