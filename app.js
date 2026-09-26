@@ -119,6 +119,8 @@
     if (parts[0] === 'review' && parts[1]) return renderReview(decodeURIComponent(parts[1]));
     if (parts[0] === 'demo') return renderDemo();
     if (parts[0] === 'how') return renderHow();
+    if (parts[0] === 'dashboard') return renderDashboard();
+    if (parts[0] === 'admin') return renderAdmin();
     renderHome();
   }
   window.addEventListener('hashchange', route);
@@ -137,7 +139,7 @@
     const key = $('#setKey').value.trim(); const api = $('#setApi').value.trim();
     if (!key) { e.preventDefault(); $('#settingsStatus').textContent = 'Please enter the access key.'; return; }
     store.set('key', key); store.set('api', api && api !== CFG.apiBase ? api : '');
-    toast('Settings saved'); setTimeout(route, 50);
+    toast('Settings saved'); setTimeout(() => { refreshMe(); route(); }, 50);
   });
   $('#testKeyBtn').addEventListener('click', async () => {
     const st = $('#settingsStatus'); const key = $('#setKey').value.trim(); const api = ($('#setApi').value.trim() || CFG.apiBase).replace(/\/$/, '');
@@ -187,9 +189,11 @@
           <div class="muted" style="font-size:13px">or click to browse</div>
         </div>
         <input type="file" id="fileInput" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden>
+        <label class="field" style="margin-top:-4px"><span>…or paste a link to the manuscript <i>Google Drive, Dropbox or a direct PDF/DOCX link</i></span><input type="url" name="manuscript_url" id="manuscriptUrl" placeholder="https://drive.google.com/file/d/…" autocomplete="off"></label>
         <div class="grid-2">
           <label class="field"><span>Target journal <em>required</em></span><input type="text" name="target_journal" required placeholder="e.g. Tourism Management"></label>
           <label class="field"><span>Paper title <i>optional</i></span><input type="text" name="paper_title" placeholder="Detected automatically"></label>
+          <label class="field"><span>Reviewer name <i>optional</i></span><input type="text" name="reviewer_name" id="reviewerName" placeholder="Shown on the report and dashboard" maxlength="120"></label>
           <label class="field"><span>Article type</span>
             <select name="article_type">
               <option>Original research article</option><option>Systematic / scoping review</option><option>Meta-analysis</option>
@@ -204,6 +208,12 @@
           <div class="mode"><input type="radio" name="review_mode" id="m3" value="FORENSIC"><label for="m3"><b>Forensic</b><span>Every applicable check · 80 refs · deepest</span></label></div>
           <div class="mode"><input type="radio" name="review_mode" id="m4" value="ORIGINALITY"><label for="m4"><b>Originality only</b><span>Copying & AI-writing screen · ~2–4 min · cheapest</span></label></div>
         </div>
+        <details class="more" id="revMore">
+          <summary>This is a revised version of an earlier review (optional)</summary>
+          <label class="field"><span>Earlier review</span><select id="prevSelect"><option value="">— first version —</option></select></label>
+          <label class="field"><span>…or earlier review ID</span><input type="text" name="previous_review_id" id="prevId" placeholder="REV-20260926-ABCDE" autocomplete="off"></label>
+          <p class="muted" style="font-size:13px;margin:-4px 0 12px">The new report gets a <i>Changes since last version</i> tab showing which findings were fixed, which remain and which are new.</p>
+        </details>
         <details class="more" id="dataMore">
           <summary>Raw dataset — reproduce the statistics (optional)</summary>
           <label class="field"><span>Survey / analysis dataset <i>CSV, XLSX or SAV · up to 25 MB</i></span><input type="file" id="datasetInput" accept=".csv,.xlsx,.xls,.sav,text/csv"></label>
@@ -211,6 +221,7 @@
         </details>
         <details class="more">
           <summary>Journal guidelines, notes & email (optional)</summary>
+          <label class="field"><span>Link to the journal's author guidelines <i>fetched automatically</i></span><input type="url" name="guidelines_url" placeholder="https://www.journals.elsevier.com/…/guide-for-authors" autocomplete="off"></label>
           <label class="field"><span>Aims & scope / author guidelines</span><textarea name="journal_guidelines" placeholder="Paste the journal's aims & scope and key submission requirements for a sharper journal-fit check"></textarea></label>
           <label class="field"><span>Anything the reviewers should know?</span><textarea name="author_notes" placeholder="e.g. This is a revised version; data collection was in 2025"></textarea></label>
           <label class="field"><span>Also email the report to</span><input type="email" name="email" placeholder="you@university.edu"></label>
@@ -226,6 +237,14 @@
 
   function wireForm() {
     const dz = $('#dropzone'), fi = $('#fileInput'), form = $('#submitForm'), err = $('#formError');
+    try {
+      const rn = $('#reviewerName'); if (rn) rn.value = store.get('reviewerName', '') || '';
+      const ps = $('#prevSelect');
+      if (ps) {
+        history.all().filter(r => r.status === 'complete').slice(0, 40).forEach(r => { const o = document.createElement('option'); o.value = r.id; o.textContent = (r.title || r.id).slice(0, 70) + ' · ' + r.id; ps.appendChild(o); });
+        const pre = store.get('prefillPrev', ''); if (pre) { store.del('prefillPrev'); $('#revMore').open = true; if (![...ps.options].some(o => o.value === pre)) { const o = document.createElement('option'); o.value = pre; o.textContent = pre; ps.appendChild(o); } ps.value = pre; }
+      }
+    } catch (e) { /* optional prefill */ }
     let file = null;
     const setFile = (f) => {
       if (!f) return;
@@ -247,12 +266,17 @@
       e.preventDefault(); err.textContent = '';
       const s = settings();
       if (!s.key) { openSettings('An access key is required to submit.'); return; }
-      if (!file) { err.textContent = 'Please choose your manuscript file.'; return; }
+      const mUrl = ($('#manuscriptUrl') && $('#manuscriptUrl').value.trim()) || '';
+      if (!file && !mUrl) { err.textContent = 'Please choose your manuscript file or paste a link to it.'; return; }
+      if (!file && !/^https?:\/\//i.test(mUrl)) { err.textContent = 'The manuscript link must start with http:// or https://'; return; }
       const fd = new FormData(form);
       if (!String(fd.get('target_journal') || '').trim()) { err.textContent = 'Please enter the target journal.'; form.target_journal.focus(); return; }
       if (!$('#consent').checked) { err.textContent = 'Please confirm the data-processing statement.'; return; }
       fd.append('access_key', s.key);
-      fd.append('manuscript', file, file.name);
+      if (file) { fd.append('manuscript', file, file.name); fd.delete('manuscript_url'); }
+      const prevSel = ($('#prevSelect') && $('#prevSelect').value) || '';
+      if (prevSel && !String(fd.get('previous_review_id') || '').trim()) fd.set('previous_review_id', prevSel);
+      store.set('reviewerName', String(fd.get('reviewer_name') || ''));
       const dsf = ($('#datasetInput') && $('#datasetInput').files[0]) || null;
       if (dsf) {
         const dext = (dsf.name.split('.').pop() || '').toLowerCase();
@@ -265,7 +289,7 @@
         const res = await fetch(s.api.replace(/\/$/, '') + CFG.submitPath, { method: 'POST', body: fd });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || ('Submission failed (' + res.status + ')'));
-        history.upsert({ id: data.review_id, title: fd.get('paper_title') || file.name, journal: fd.get('target_journal'), mode: fd.get('review_mode'), submitted_at: new Date().toISOString(), status: 'queued' });
+        history.upsert({ id: data.review_id, title: fd.get('paper_title') || (file ? file.name : mUrl.split('?')[0].split('/').pop() || 'Linked manuscript'), journal: fd.get('target_journal'), mode: fd.get('review_mode'), submitted_at: new Date().toISOString(), status: 'queued' });
         toast('Submitted — review ' + data.review_id + ' started');
         location.hash = '#/review/' + encodeURIComponent(data.review_id);
       } catch (ex) {
@@ -274,6 +298,131 @@
       }
     });
   }
+
+
+  // ---------- CHANGES SINCE PREVIOUS VERSION ----------
+  const CHANGE_LABEL = { resolved: ['Resolved', 'ok'], improved: ['Improved', 'ok'], persisting: ['Still open', 'warn'], worsened: ['Worse', 'bad'], new: ['New', 'bad'], not_rechecked: ['Not re-checked', ''] };
+  function viewChanges(V) {
+    const c = V.counts || {};
+    const sb = V.severity_before || {}, sa = V.severity_after || {};
+    const items = arr(V.items);
+    const row = i => `<tr><td><span class="tag ${CHANGE_LABEL[i.change] ? CHANGE_LABEL[i.change][1] : ''}">${esc((CHANGE_LABEL[i.change] || [i.change])[0])}</span></td>
+      <td class="mono">${esc(i.check_id)}</td><td>${esc(i.section || '')}</td>
+      <td>${i.before ? `<span class="sev sev-${esc(i.before.severity)}">${esc(i.before.severity)}</span> ${esc(i.before.finding || '')}` : '<span class="muted">—</span>'}</td>
+      <td>${i.after ? `<span class="sev sev-${esc(i.after.severity || 'INFO')}">${esc(i.after.severity || i.after.status)}</span> ${esc(i.after.finding || '')}` : '<span class="muted">not checked this time</span>'}</td></tr>`;
+    const sevRow = k => `<tr><td>${esc(k[0].toUpperCase() + k.slice(1))}</td><td>${esc(sb[k] || 0)}</td><td>${esc(sa[k] || 0)}</td><td>${(sa[k] || 0) - (sb[k] || 0) > 0 ? '+' : ''}${(sa[k] || 0) - (sb[k] || 0)}</td></tr>`;
+    return `
+      <div class="card">
+        <div class="card-head"><h2>Changes since version ${esc((V.version || 2) - 1)}</h2><a class="btn btn-ghost btn-sm" href="#/review/${encodeURIComponent(V.previous_review_id)}">Open previous review</a></div>
+        <p class="muted" style="margin-top:0">Compared with <span class="mono">${esc(V.previous_review_id)}</span>${V.previous_completed_at ? ' (' + esc(fmtDate(V.previous_completed_at)) + ')' : ''}, check by check. A check counts as resolved when this review evaluated it and found no problem.</p>
+        <div class="stats">
+          <div class="stat"><div class="n" style="color:var(--ok)">${(c.resolved || 0)}</div><div class="l">Resolved</div></div>
+          <div class="stat"><div class="n" style="color:var(--ok)">${(c.improved || 0)}</div><div class="l">Improved</div></div>
+          <div class="stat verify"><div class="n">${(c.persisting || 0)}</div><div class="l">Still open</div></div>
+          <div class="stat critical"><div class="n">${(c.new || 0) + (c.worsened || 0)}</div><div class="l">New or worse</div></div>
+          <div class="stat"><div class="n">${(c.not_rechecked || 0)}</div><div class="l">Not re-checked</div></div>
+        </div>
+        <div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Severity</th><th>Before</th><th>Now</th><th>Change</th></tr></thead>
+          <tbody>${['critical', 'major', 'minor'].map(sevRow).join('')}</tbody></table></div>
+      </div>
+      <div class="toolbar" id="chgFilter">${['all', 'new', 'worsened', 'persisting', 'improved', 'resolved', 'not_rechecked'].map((k, i) => `<button class="btn btn-sm ${i ? 'btn-ghost' : 'btn-primary'}" data-f="${k}">${k === 'all' ? 'All' : esc(CHANGE_LABEL[k][0])}</button>`).join('')}</div>
+      <div class="table-wrap"><table id="chgTable"><thead><tr><th>Change</th><th>Check</th><th>Section</th><th>Before</th><th>Now</th></tr></thead>
+        <tbody>${items.map(i => row(i).replace('<tr>', `<tr data-c="${esc(i.change)}">`)).join('') || '<tr><td colspan="5" class="muted">No check-level differences.</td></tr>'}</tbody></table></div>`;
+  }
+  document.addEventListener('click', e => {
+    const b = e.target.closest && e.target.closest('#chgFilter button'); if (!b) return;
+    $$('#chgFilter button').forEach(x => { x.classList.toggle('btn-primary', x === b); x.classList.toggle('btn-ghost', x !== b); });
+    $$('#chgTable tbody tr[data-c]').forEach(tr => { tr.hidden = b.dataset.f !== 'all' && tr.dataset.c !== b.dataset.f; });
+  });
+
+  // ---------- DASHBOARD ----------
+  const setMe = me => { try { store.set('me', me || null); const a = $('#adminNav'); if (a) a.hidden = !(me && me.role === 'admin'); } catch (e) { /* ignore */ } };
+  async function refreshMe() { if (!settings().key) return setMe(null); try { const d = await apiGetJson('/q1-review-dashboard', { scope: 'mine' }); setMe(d.me); } catch (e) { /* offline or bad key */ } }
+  async function renderDashboard() {
+    if (!settings().key) { app.innerHTML = '<div class="card empty">Add your access key in Settings to see your dashboard.</div>'; return; }
+    const me0 = store.get('me', null);
+    const scope = store.get('dashScope', 'all');
+    app.innerHTML = '<div class="card empty"><span class="spinner"></span> Loading dashboard…</div>';
+    let d;
+    try { d = await apiGetJson('/q1-review-dashboard', { scope }); } catch (e) { app.innerHTML = `<div class="card empty">Could not load the dashboard: ${esc(e.message)}</div>`; return; }
+    setMe(d.me);
+    const isAdmin = d.me && d.me.role === 'admin';
+    const t = d.totals || {};
+    const groups = {};
+    arr(d.reviews).forEach(r => { (groups[r.manuscript_id] = groups[r.manuscript_id] || []).push(r); });
+    const glist = Object.values(groups).map(g => g.sort((a, b) => (b.version || 1) - (a.version || 1)));
+    glist.sort((a, b) => String(b[0].submitted_at).localeCompare(String(a[0].submitted_at)));
+    const sevMini = sc => sc ? `<span class="sev sev-CRITICAL" title="Critical">${sc.critical || 0}</span> <span class="sev sev-MAJOR" title="Major">${sc.major || 0}</span> <span class="sev sev-MINOR" title="Minor">${sc.minor || 0}</span>` : '';
+    const stTag = r => r.status === 'complete' ? `<span class="tag ok">${esc(READINESS[r.readiness] || 'Complete')}</span>` : r.status === 'failed' ? `<span class="tag bad" title="${esc(r.error)}">Failed</span>` : '<span class="tag warn">In progress</span>';
+    const row = (r, first) => `<tr>
+      <td>${first ? `<b>${esc(r.title || r.review_id)}</b>` : '<span class="muted">↳ earlier version</span>'}<div class="muted" style="font-size:12px">${esc(r.target_journal)} · ${esc(r.mode)}${r.reviewer_name ? ' · ' + esc(r.reviewer_name) : ''}${isAdmin && r.owner ? ' · key: ' + esc(r.owner) : ''}${r.source && r.source !== 'webapp' ? ' · via ' + esc(r.source) : ''}</div></td>
+      <td><span class="tag">v${esc(r.version)}</span></td>
+      <td>${stTag(r)}</td><td>${sevMini(r.severity_counts)}</td>
+      <td style="white-space:nowrap">${esc(fmtDate(r.submitted_at))}</td>
+      <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="#/review/${encodeURIComponent(r.review_id)}">Open</a>
+        ${r.manuscript_link ? `<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="${esc(r.manuscript_link)}">File</a>` : ''}
+        ${first && r.status === 'complete' ? `<button class="btn btn-ghost btn-sm" data-rereview="${esc(r.review_id)}">Review revision</button>` : ''}</td></tr>`;
+    app.innerHTML = `
+      <div class="card-head" style="margin-bottom:10px"><h1 style="margin:0">Dashboard</h1><a class="btn btn-primary" href="#/">New review</a></div>
+      <p class="muted" style="margin-top:-4px">Signed in as <b>${esc((d.me && d.me.name) || '—')}</b>${isAdmin ? ' · admin' : ''}. ${isAdmin ? 'Admins see every review; ' : ''}reviews are grouped by manuscript, newest version first.</p>
+      ${isAdmin ? `<div class="toolbar"><button class="btn btn-sm ${scope === 'all' ? 'btn-primary' : 'btn-ghost'}" data-scope="all">All reviews</button><button class="btn btn-sm ${scope === 'mine' ? 'btn-primary' : 'btn-ghost'}" data-scope="mine">Only mine</button><a class="btn btn-sm btn-ghost" href="#/admin">Manage access keys</a></div>` : ''}
+      <div class="stats" style="grid-template-columns:repeat(4,1fr)">
+        <div class="stat"><div class="n">${t.all || 0}</div><div class="l">Reviews</div></div>
+        <div class="stat"><div class="n" style="color:var(--ok)">${t.complete || 0}</div><div class="l">Complete</div></div>
+        <div class="stat verify"><div class="n">${t.running || 0}</div><div class="l">In progress</div></div>
+        <div class="stat critical"><div class="n">${t.failed || 0}</div><div class="l">Failed</div></div>
+      </div>
+      ${glist.length ? `<div class="table-wrap" style="margin-top:14px"><table><thead><tr><th>Manuscript</th><th>Version</th><th>Status</th><th>Issues</th><th>Submitted</th><th></th></tr></thead>
+        <tbody>${glist.map(g => g.map((r, i) => row(r, i === 0)).join('')).join('')}</tbody></table></div>` : '<div class="card empty" style="margin-top:14px">No reviews yet for this key.</div>'}`;
+    $$('[data-scope]').forEach(b => b.addEventListener('click', () => { store.set('dashScope', b.dataset.scope); renderDashboard(); }));
+    $$('[data-rereview]').forEach(b => b.addEventListener('click', () => { store.set('prefillPrev', b.dataset.rereview); location.hash = '#/'; }));
+  }
+
+  // ---------- ADMIN: access keys ----------
+  async function renderAdmin() {
+    if (!settings().key) { app.innerHTML = '<div class="card empty">Add your admin access key in Settings first.</div>'; return; }
+    app.innerHTML = '<div class="card empty"><span class="spinner"></span> Loading users…</div>';
+    let d;
+    try { d = await apiPostForm('/q1-review-admin', { action: 'list' }); } catch (e) { app.innerHTML = `<div class="card empty">${esc(e.message)}</div>`; return; }
+    const users = arr(d.users);
+    app.innerHTML = `
+      <div class="card-head" style="margin-bottom:10px"><h1 style="margin:0">Access keys</h1><a class="btn btn-ghost" href="#/dashboard">Dashboard</a></div>
+      <p class="muted" style="margin-top:-4px">Give each co-author or student their own key. They only see their own reviews; admins see everything. Keys are stored hashed — a new key is shown once, so copy it before leaving this page.</p>
+      <div id="newKeyBox"></div>
+      <form class="card" id="addUser" style="margin-bottom:16px">
+        <h2 style="margin-top:0">Add a person</h2>
+        <div class="grid-2">
+          <label class="field"><span>Name <em>required</em></span><input name="name" required maxlength="120"></label>
+          <label class="field"><span>Email <i>optional — Drive-inbox reports go here</i></span><input name="email" type="email" maxlength="160"></label>
+          <label class="field"><span>Role</span><select name="role"><option value="user">User — own reviews only</option><option value="admin">Admin — all reviews + this page</option><option value="system">System — e.g. Drive inbox</option></select></label>
+          <label class="field"><span>Notes <i>optional</i></span><input name="notes" maxlength="400" placeholder="e.g. PhD student, co-author on paper X"></label>
+        </div>
+        <button class="btn btn-primary" type="submit">Create key</button>
+      </form>
+      <div class="table-wrap"><table><thead><tr><th>Name</th><th>Role</th><th>Key ends</th><th>Reviews</th><th>Last used</th><th>Status</th><th></th></tr></thead>
+      <tbody>${users.map(u => `<tr${u.active ? '' : ' style="opacity:.55"'}><td><b>${esc(u.name)}</b><div class="muted" style="font-size:12px">${esc(u.email)}${u.notes ? ' · ' + esc(u.notes) : ''}</div></td>
+        <td>${esc(u.role)}</td><td class="mono">${esc(u.key_hint)}</td><td>${esc(u.reviews)}</td><td>${u.last_used_at ? esc(fmtDate(u.last_used_at)) : '<span class="muted">never</span>'}</td>
+        <td>${u.active ? '<span class="tag ok">Active</span>' : '<span class="tag bad">Revoked</span>'}</td>
+        <td style="white-space:nowrap">${d.me && d.me.id === u.id ? '<span class="muted">you</span>' : `<button class="btn btn-ghost btn-sm" data-act="reset_key" data-id="${u.id}">New key</button> <button class="btn btn-ghost btn-sm" data-act="set_active" data-active="${u.active ? 'false' : 'true'}" data-id="${u.id}">${u.active ? 'Revoke' : 'Re-activate'}</button>`}</td></tr>`).join('')}</tbody></table></div>`;
+    const showKey = (name, key) => {
+      $('#newKeyBox').innerHTML = `<div class="card" style="border-color:var(--ok);margin-bottom:16px"><b>New key for ${esc(name)}</b> — copy it now and send it privately; it will not be shown again.
+        <div class="toolbar" style="margin:10px 0 0"><input class="mono" id="newKeyVal" readonly value="${esc(key)}" style="flex:1;min-width:260px"><button class="btn btn-primary btn-sm" id="copyKey" type="button">Copy</button></div></div>`;
+      $('#copyKey').addEventListener('click', () => navigator.clipboard.writeText(key).then(() => toast('Key copied'), () => { $('#newKeyVal').select(); toast('Press Ctrl+C to copy'); }));
+      window.scrollTo(0, 0);
+    };
+    $('#addUser').addEventListener('submit', async e => {
+      e.preventDefault(); const f = new FormData(e.target);
+      try { const r = await apiPostForm('/q1-review-admin', { action: 'create', name: f.get('name'), email: f.get('email'), role: f.get('role'), notes: f.get('notes') });
+        await renderAdmin(); if (r.new_key) showKey(r.user ? r.user.name : f.get('name'), r.new_key); } catch (err) { toast(err.message); }
+    });
+    $$('[data-act]').forEach(b => b.addEventListener('click', async () => {
+      const act = b.dataset.act;
+      if (act === 'reset_key' && !confirmInline(b, 'Old key stops working. Continue?')) return;
+      try { const r = await apiPostForm('/q1-review-admin', { action: act, user_id: b.dataset.id, active: b.dataset.active || '' });
+        await renderAdmin(); if (r.new_key) showKey(r.user ? r.user.name : 'user', r.new_key); else toast('Saved'); } catch (err) { toast(err.message); }
+    }));
+  }
+  function confirmInline(btn, msg) { if (btn.dataset.armed) return true; btn.dataset.armed = '1'; const t = btn.textContent; btn.textContent = 'Click again to confirm'; toast(msg); setTimeout(() => { delete btn.dataset.armed; btn.textContent = t; }, 4000); return false; }
 
   // ---------- MY REVIEWS ----------
   function renderReviews() {
@@ -394,6 +543,8 @@
     if (R.literature) tabs.splice(tabs.findIndex(t => t[0] === 'references') + 1, 0, ['literature', 'Literature & novelty']);
     if (R.modules) tabs.splice(tabs.findIndex(t => t[0] === 'references'), 0, ['stats', 'Statistics & tables']);
     if (R.inventory && arr(R.inventory.hypotheses).length) tabs.splice(tabs.findIndex(t => t[0] === 'references'), 0, ['evidence', 'Evidence map']);
+    const V = R.version || null;
+    if (V && V.previous_review_id && V.counts) tabs.splice(1, 0, ['changes', 'Changes since v' + ((V.version || 2) - 1), (V.counts.resolved || 0) + (V.counts.improved || 0)]);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -404,7 +555,7 @@
           <div class="report-meta">
             <span>Target: <b>${esc(M.target_journal || '—')}</b></span><span>${esc(M.article_type || '')}</span>
             <span>Mode: ${esc(M.mode || '')}</span><span>${esc(M.word_count || '?')} words${M.ocr_used ? ' · OCR' : ''}</span>
-            <span class="mono">${esc(R.review_id || id)}</span><span>${esc(fmtDate(R.generated_at))}</span>
+            <span class="mono">${esc(R.review_id || id)}</span><span>${esc(fmtDate(R.generated_at))}</span>${V && V.version > 1 ? `<span class="tag">Version ${esc(V.version)}</span>` : ''}${M.reviewer_name ? `<span>Reviewer: ${esc(M.reviewer_name)}</span>` : ''}
           </div>
         </div>
         <div class="report-actions">
@@ -418,6 +569,7 @@
       </div>
       <nav class="tabs" role="tablist">${tabs.map((t, i) => `<button role="tab" data-tab="${t[0]}" class="${i === 0 ? 'active' : ''}" aria-selected="${i === 0}">${esc(t[1])}${t[2] !== undefined ? `<span class="count">${t[2]}</span>` : ''}</button>`).join('')}</nav>
       <section class="tab-panel" data-panel="overview">${viewOverview(R, S, sev, readiness)}</section>
+      ${V && V.previous_review_id && V.counts ? `<section class="tab-panel" data-panel="changes" hidden>${viewChanges(V)}</section>` : ''}
       <section class="tab-panel" data-panel="comments" hidden>${viewComments(S)}</section>
       <section class="tab-panel" data-panel="findings" hidden>${viewFindingsShell(actionable)}</section>
       <section class="tab-panel" data-panel="final" hidden>${viewFinal(!!opts.demo)}</section>
@@ -1045,11 +1197,14 @@
           <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
+          <li><div><b>Versions, team keys & intake</b><span>Upload a file or paste a Drive/Dropbox link, give the journal's guideline URL to fetch its requirements, and mark a submission as a revision of an earlier review to get a check-by-check "resolved / still open / new" comparison. Each co-author or student can have their own revocable key, every manuscript is filed in a Google Drive folder, and a dashboard lists all reviews by manuscript and version. Files dropped into the Drive inbox folder are reviewed automatically.</span></div></li>
           <li><div><b>You decide</b><span>Confirm, modify or reject each finding, tick off the roadmap, and export your validated list.</span></div></li>
         </ol>
         <div class="card" style="margin-top:22px"><h3>Privacy</h3><p style="margin:0">Manuscript text is sent to Google Gemini (free tier: Google may use submitted text to improve its products, and human reviewers may read it) and Anthropic Claude through your own n8n server, and short sampled phrases are searched in OpenAlex and Europe PMC and stored there (status table, Google Drive report). This site is static: it stores nothing except your access key, review list and validation notes in your own browser. Do not upload manuscripts you received in confidence as a journal reviewer.</p></div>
       </div>`;
   }
 
+  setMe(store.get('me', null));
+  refreshMe();
   route();
 })();
