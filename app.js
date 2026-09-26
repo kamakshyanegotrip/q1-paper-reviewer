@@ -380,6 +380,7 @@
     if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
     tabs.splice(3, 0, ['final', 'Final report']);
     if (R.literature) tabs.splice(tabs.findIndex(t => t[0] === 'references') + 1, 0, ['literature', 'Literature & novelty']);
+    if (R.modules) tabs.splice(tabs.findIndex(t => t[0] === 'references'), 0, ['stats', 'Statistics & tables']);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -410,6 +411,7 @@
       <section class="tab-panel" data-panel="audits" hidden>${viewAudits(R)}</section>
       <section class="tab-panel" data-panel="references" hidden>${viewReferences(R)}</section>
       ${R.literature ? `<section class="tab-panel" data-panel="literature" hidden>${viewLiterature(R.literature)}</section>` : ''}
+      ${R.modules ? `<section class="tab-panel" data-panel="stats" hidden>${viewModules(R.modules, R)}</section>` : ''}
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
@@ -691,6 +693,35 @@
   }
 
   // ---- literature, novelty & citation accuracy (OpenAlex) ----
+  // ---- statistics & tables (Phase D: table extraction, deterministic recomputation, specialist modules) ----
+  function viewModules(M, R) {
+    const VD = { SOUND: ['Sound', 'ok'], MINOR_CONCERNS: ['Minor concerns', 'warn'], MAJOR_CONCERNS: ['Major concerns', 'bad'], NOT_APPLICABLE: ['Not applicable', ''], FAILED: ['Did not run', 'bad'], UNCLEAR: ['Unclear', ''] };
+    const D = M.deterministic || {}, mods = arr(M.modules), rep = arr(D.reproduced), det = arr(D.findings);
+    const sevTag = s => `<span class="tag ${s === 'CRITICAL' || s === 'MAJOR' ? 'bad' : s === 'MINOR' ? 'warn' : ''}">${esc(s)}</span>`;
+    const diff = (a, b) => a === null || a === undefined || b === null || b === undefined ? '' : Math.abs(Number(a) - Number(b)) > 0.03 ? ' <span class="no">✕</span>' : ' <span class="yes">✓</span>';
+    const modFindings = arr(R.findings).filter(f => /^Specialist Module|^Table Consistency/.test(f.reviewer || '') && f.status !== 'PASS' && f.status !== 'NA');
+    return `
+      <div class="card">
+        <div class="card-head"><h2>Numbers recomputed from your tables</h2><small>arithmetic by code, not by AI</small></div>
+        <p class="muted" style="font-size:14px">Every table and reported statistic was transcribed, then checked by code: AVE and composite reliability recomputed from your loadings, t-values against p-values, confidence intervals against "supported", HTMT and Fornell-Larcker, VIF and fit thresholds.</p>
+        ${rep.length ? table(['Construct', 'Items', 'AVE reported', 'AVE recomputed', 'CR reported', 'CR recomputed'], rep.map(r => [esc(r.construct), esc(r.items), esc(r.ave_reported ?? '—'), esc(r.ave_recomputed) + diff(r.ave_reported, r.ave_recomputed), esc(r.cr_reported ?? '—'), esc(r.cr_recomputed) + diff(r.cr_reported, r.cr_recomputed)])) : '<p class="muted">No loadings table was found, so AVE and CR could not be recomputed.</p>'}
+        <h3>Consistency problems found by code (${det.length})</h3>
+        ${det.length ? `<ul class="clean">${det.map(f => `<li>${sevTag(f.severity)} ${esc(f.finding)}${f.evidence_verified ? '' : ' <span class="muted" style="font-size:13px">(value not matched to a quote — check the extraction)</span>'}</li>`).join('')}</ul>` : '<p class="muted">No arithmetic inconsistencies detected in the extracted values.</p>'}
+        ${arr(D.notes).length ? `<p class="muted" style="font-size:13px">${D.notes.map(n => esc(n.finding)).join(' · ')}</p>` : ''}
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Specialist modules</h2><small>${mods.length ? esc(mods.length) + ' run' : 'none run'}</small></div>
+        ${mods.length ? mods.map(m => { const v = VD[m.verdict] || [m.verdict, ''];
+          return `<div class="comment"><b>${esc(m.name)}</b> <span class="tag ${v[1]}">${esc(v[0])}</span> <span class="muted" style="font-size:13px">${esc((m.counts || {}).fail || 0)} fail · ${esc((m.counts || {}).partial || 0)} partial · ${esc((m.counts || {}).pass || 0)} pass</span>
+            ${m.summary ? `<p style="margin:6px 0 0;font-size:14px">${esc(m.summary)}</p>` : ''}${m.error ? `<p class="muted" style="font-size:13px">${esc(m.error)}</p>` : ''}
+            ${arr(m.recomputations).length ? table(['Recomputed', 'Reported', 'Recomputed value', 'Consistent'], m.recomputations.map(r => [esc(r.what), esc(r.reported), esc(r.recomputed), r.consistent === false ? '<span class="no">No</span>' : r.consistent === true ? '<span class="yes">Yes</span>' : '—'])) : ''}</div>`; }).join('')
+          : '<p class="muted">Specialist modules run in Full Q1 and Forensic modes when the study design calls for them (SEM, regression, mediation, moderation, multigroup, qualitative; reporting-guideline audit in Forensic).</p>'}
+        ${modFindings.length ? `<h3>Module and table findings sent to adjudication (${modFindings.length})</h3>${table(['Check', 'Severity', 'Finding'], modFindings.slice(0, 40).map(f => [esc(f.check_id), sevTag(f.severity), esc(f.finding)]))}` : ''}
+      </div>
+      ${arr(M.tables).length ? `<div class="card"><div class="card-head"><h2>Tables as extracted</h2><small>check these if a number above looks wrong</small></div>${M.tables.map(t => `<h3 style="margin-top:14px">${esc(t.id || 'Table')} <span class="muted" style="font-weight:400;font-size:13px">${esc(t.caption || '')} ${esc(t.location || '')}</span></h3>${table(arr(t.columns).length ? t.columns : arr(arr(t.rows)[0]).map((_, i) => 'Col ' + (i + 1)), arr(t.rows).map(r => arr(r).map(c => esc(c))))}`).join('')}</div>` : ''}
+      ${arr(M.errors).length ? `<div class="warnings"><b>Warnings:</b> ${M.errors.map(esc).join(' · ')}</div>` : ''}`;
+  }
+
   function viewLiterature(LT) {
     const nv = LT.novelty || {}, X = LT.xref || {}, cc = LT.citation_check_counts || {}, rp = LT.refs_profile || {};
     const NL = { CLEAR_ADVANCE: ['Clear advance', 'ok'], INCREMENTAL: ['Incremental', 'warn'], LARGELY_OVERLAPPING: ['Largely overlapping', 'bad'], UNCLEAR: ['Unclear', ''], NOT_RUN: ['Not run', ''] };
@@ -898,6 +929,7 @@
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
+          <li><div><b>Table &amp; statistics modules</b><span>Every table is transcribed and the numbers are re-checked by code (AVE and composite reliability recomputed from loadings, t against p, confidence intervals against "supported", HTMT, VIF, fit). In Full and Forensic modes, specialist modules then go deeper where your design needs them: SEM approach, measurement model, regression, mediation, moderation, multigroup analysis, qualitative rigour and a reporting-guideline audit.</span></div></li>
           <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
