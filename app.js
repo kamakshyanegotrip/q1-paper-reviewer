@@ -204,6 +204,11 @@
           <div class="mode"><input type="radio" name="review_mode" id="m3" value="FORENSIC"><label for="m3"><b>Forensic</b><span>Every applicable check · 80 refs · deepest</span></label></div>
           <div class="mode"><input type="radio" name="review_mode" id="m4" value="ORIGINALITY"><label for="m4"><b>Originality only</b><span>Copying & AI-writing screen · ~2–4 min · cheapest</span></label></div>
         </div>
+        <details class="more" id="dataMore">
+          <summary>Raw dataset — reproduce the statistics (optional)</summary>
+          <label class="field"><span>Survey / analysis dataset <i>CSV, XLSX or SAV · up to 25 MB</i></span><input type="file" id="datasetInput" accept=".csv,.xlsx,.xls,.sav,text/csv"></label>
+          <p class="muted" style="font-size:13px;margin:-4px 0 12px">If you attach the raw data, a private statistics engine re-runs reliability (alpha, CR, AVE), loadings, HTMT and the structural paths with bootstrapping, and flags any reported value it cannot reproduce. Column names should match the item labels in your tables (e.g. SQ1, SQ2…). The data is analysed in memory and not stored.</p>
+        </details>
         <details class="more">
           <summary>Journal guidelines, notes & email (optional)</summary>
           <label class="field"><span>Aims & scope / author guidelines</span><textarea name="journal_guidelines" placeholder="Paste the journal's aims & scope and key submission requirements for a sharper journal-fit check"></textarea></label>
@@ -248,6 +253,13 @@
       if (!$('#consent').checked) { err.textContent = 'Please confirm the data-processing statement.'; return; }
       fd.append('access_key', s.key);
       fd.append('manuscript', file, file.name);
+      const dsf = ($('#datasetInput') && $('#datasetInput').files[0]) || null;
+      if (dsf) {
+        const dext = (dsf.name.split('.').pop() || '').toLowerCase();
+        if (!['csv', 'xlsx', 'xls', 'sav'].includes(dext)) { err.textContent = 'The dataset must be a CSV, XLSX or SAV file.'; return; }
+        if (dsf.size > 25 * 1024 * 1024) { err.textContent = 'The dataset is larger than 25 MB.'; return; }
+        fd.append('dataset', dsf, dsf.name);
+      }
       const btn = $('#submitBtn'); btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Uploading…';
       try {
         const res = await fetch(s.api.replace(/\/$/, '') + CFG.submitPath, { method: 'POST', body: fd });
@@ -1029,6 +1041,7 @@
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
           <li><div><b>Evidence map</b><span>Each hypothesis is traced from theory to measures, result and conclusion, each objective through method, results, discussion and conclusion, and each claim to the evidence or source behind it. Broken and weak links are shown in red and amber.</span></div></li>
           <li><div><b>Table &amp; statistics modules</b><span>Every table is transcribed and the numbers are re-checked by code (AVE and composite reliability recomputed from loadings, t against p, confidence intervals against "supported", HTMT, VIF, fit). In Full and Forensic modes, specialist modules then go deeper where your design needs them: SEM approach, measurement model, regression, mediation, moderation, multigroup analysis, qualitative rigour and a reporting-guideline audit.</span></div></li>
+          <li><div><b>Raw-data reproduction (optional)</b><span>If you attach your dataset (CSV, XLSX or SAV), a private Python statistics engine running on our own server re-computes alpha, CR, AVE, loadings, HTMT, Fornell-Larcker and the PLS paths with bootstrapped confidence intervals (or a CFA for CB-SEM) and lists every reported value it cannot reproduce. The data never goes to an AI service and is not stored.</span></div></li>
           <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
