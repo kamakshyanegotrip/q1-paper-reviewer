@@ -2,6 +2,11 @@
    Talks to the n8n review engine through two webhooks:
      POST {apiBase}/q1-review-submit   multipart form → { ok, review_id }
      GET  {apiBase}/q1-review-status?id=&key=[&include=result] → progress / final result JSON
+   and the human-validation API:
+     POST {apiBase}/q1-review-validate     urlencoded {key, review_id, payload, reviewer} → saves decisions
+     GET  {apiBase}/q1-review-validations  ?id=&key= → { validations }
+     POST {apiBase}/q1-review-finalize     urlencoded {key, review_id, reviewer} → 202, builds final documents
+     GET  {apiBase}/q1-review-final        ?id=&key=[&include=audit] → status + links
 */
 (function () {
   'use strict';
@@ -81,6 +86,25 @@
     let data = null; try { data = await res.json(); } catch (e) { /* non-JSON */ }
     if (!res.ok || !data) throw new Error((data && data.error) || ('Status request failed (' + res.status + ')'));
     return data;
+  }
+
+  const P = {
+    validate: CFG.validatePath || '/q1-review-validate', validations: CFG.validationsPath || '/q1-review-validations',
+    finalize: CFG.finalizePath || '/q1-review-finalize', final: CFG.finalPath || '/q1-review-final'
+  };
+  const apiUrl = path => settings().api.replace(/\/$/, '') + path;
+  async function apiJson(res) {
+    let d = null; try { d = await res.json(); } catch (e) { /* non-JSON */ }
+    if (!res.ok || !d) throw new Error((d && d.error) || ('Request failed (' + res.status + ')'));
+    return d;
+  }
+  async function apiGetJson(path, params) {
+    const q = new URLSearchParams(Object.assign({ key: settings().key }, params || {}));
+    return apiJson(await fetch(apiUrl(path) + '?' + q.toString(), { method: 'GET', cache: 'no-store' }));
+  }
+  async function apiPostForm(path, params) {
+    const body = new URLSearchParams(Object.assign({ key: settings().key }, params || {}));
+    return apiJson(await fetch(apiUrl(path), { method: 'POST', body }));
   }
 
   // ---------- router ----------
@@ -354,6 +378,7 @@
       ['roadmap', 'Revision roadmap'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
     ];
     if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
+    tabs.splice(3, 0, ['final', 'Final report']);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -380,6 +405,7 @@
       <section class="tab-panel" data-panel="overview">${viewOverview(R, S, sev, readiness)}</section>
       <section class="tab-panel" data-panel="comments" hidden>${viewComments(S)}</section>
       <section class="tab-panel" data-panel="findings" hidden>${viewFindingsShell(actionable)}</section>
+      <section class="tab-panel" data-panel="final" hidden>${viewFinal(!!opts.demo)}</section>
       <section class="tab-panel" data-panel="audits" hidden>${viewAudits(R)}</section>
       <section class="tab-panel" data-panel="references" hidden>${viewReferences(R)}</section>
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
@@ -391,7 +417,8 @@
       $$('.tabs button').forEach(x => { x.classList.toggle('active', x === b); x.setAttribute('aria-selected', x === b); });
       $$('.tab-panel').forEach(p => { p.hidden = p.dataset.panel !== b.dataset.tab; });
     }));
-    wireFindings(actionable, id);
+    wireFindings(actionable, id, !!opts.demo);
+    wireFinal(id, actionable, !!opts.demo);
     wireChecks(findings);
     wireRoadmap(id);
     const letterCopy = $('#copyLetter'); if (letterCopy) letterCopy.addEventListener('click', () => { navigator.clipboard.writeText(S.reviewer_letter || '').then(() => toast('Letter copied'), () => toast('Copy failed')); });
@@ -464,7 +491,7 @@
   function viewFindingsShell(list) {
     const sections = [...new Set(list.map(a => a.section).filter(Boolean))].sort();
     return `
-      <div class="card" style="margin-bottom:16px"><p style="margin:0">Every issue below survived adjudication. Decide what to do with each one — your decisions are saved in this browser and included in <b>Export validations</b>. <span class="muted" id="valProgress"></span></p></div>
+      <div class="card" style="margin-bottom:16px"><p style="margin:0">Every issue below survived adjudication. Decide what to do with each one — your decisions are saved in this browser and on your review server, and they drive the <b>Final report</b>. <span class="muted" id="valProgress"></span> <span class="muted" id="valSync"></span></p></div>
       <div class="toolbar">
         <select id="fSev" aria-label="Severity"><option value="">All severities</option><option>CRITICAL</option><option>MAJOR</option><option>MINOR</option><option>INFO</option></select>
         <select id="fDec" aria-label="Decision"><option value="">All decisions</option><option>CONFIRMED</option><option>NEEDS_VERIFICATION</option><option>DISPUTED</option></select>
@@ -474,8 +501,21 @@
       </div>
       <div id="findingList"></div>`;
   }
-  function wireFindings(list, id) {
+  function wireFindings(list, id, demo) {
     const vals = store.get('val:' + id, {});
+    const online = !demo && !!settings().key;
+    let syncTimer = null;
+    const syncNote = t => { const el = $('#valSync'); if (el) el.textContent = t; };
+    const push = () => {
+      clearTimeout(syncTimer);
+      if (!online || !Object.keys(vals).length) return;
+      syncNote('Saving…');
+      syncTimer = setTimeout(() => {
+        apiPostForm(P.validate, { review_id: id, payload: JSON.stringify(vals), reviewer: store.get('reviewer', '') })
+          .then(() => syncNote('Saved to server.'))
+          .catch(e => syncNote('Not saved to server (' + e.message + ') — kept in this browser.'));
+      }, 1200);
+    };
     const draw = () => {
       const sv = $('#fSev').value, dv = $('#fDec').value, sc = $('#fSec').value, vv = $('#fVal').value, q = $('#fQ').value.toLowerCase();
       const shown = list.filter(a => (!sv || a.severity === sv) && (!dv || a.decision === dv) && (!sc || a.section === sc)
@@ -507,14 +547,92 @@
       const b = e.target.closest('button[data-v]'); if (!b) return;
       const fid = b.closest('.finding').dataset.id; const cur = vals[fid] || {};
       cur.v = cur.v === b.dataset.v ? '' : b.dataset.v; cur.at = new Date().toISOString(); vals[fid] = cur;
-      store.set('val:' + id, vals); draw();
+      store.set('val:' + id, vals); draw(); push();
     });
     $('#findingList').addEventListener('change', e => {
       if (!e.target.matches('[data-note]')) return;
-      const fid = e.target.closest('.finding').dataset.id; vals[fid] = Object.assign(vals[fid] || {}, { note: e.target.value });
-      store.set('val:' + id, vals);
+      const fid = e.target.closest('.finding').dataset.id; vals[fid] = Object.assign(vals[fid] || {}, { note: e.target.value, at: new Date().toISOString() });
+      store.set('val:' + id, vals); push();
     });
     draw();
+    if (online) {
+      apiGetJson(P.validations, { id }).then(d => {
+        const sv = (d && d.validations) || {};
+        let changed = false;
+        Object.keys(sv).forEach(k => {
+          const a = sv[k], b = vals[k];
+          if (!b || (a.at && (!b.at || a.at > b.at))) { vals[k] = { v: a.v || '', note: a.note || '', at: a.at || '' }; changed = true; }
+        });
+        if (changed) { store.set('val:' + id, vals); draw(); }
+        const localNewer = Object.keys(vals).some(k => !sv[k] || (vals[k].at || '') > (sv[k].at || ''));
+        if (localNewer) push(); else syncNote(Object.keys(sv).length ? 'Synced with server.' : '');
+      }).catch(() => syncNote('Server sync unavailable — decisions kept in this browser.'));
+    }
+  }
+
+  // ---- final human-validated report ----
+  function viewFinal(demo) {
+    return `
+      <div class="card"><h2>Final human-validated report</h2>
+        <p>When you have worked through <b>Validate findings</b>, generate the final documents. Rejected findings are removed, modified findings follow your note, and “Need evidence” findings become questions to the authors. Findings you have not validated stay in and are marked as not validated.</p>
+        <p class="muted" style="font-size:14px">You get a Final Reviewer Report, a confidential Editor Report and an Author Revision Roadmap (each as DOCX and PDF), the Evidence Matrix (XLSX) and an audit file. The documents are saved in the review engine’s Google Drive, so the download links work when you are signed in to that Google account. It takes about 2–4 minutes.</p>
+        ${demo ? '<p class="muted"><i>Available for your own reviews, not for the sample.</i></p>' : `
+        <div class="final-form">
+          <label class="field"><span>Validated by <i>optional, printed on the report</i></span><input type="text" id="finReviewer" maxlength="120" placeholder="Your name"></label>
+          <button class="btn btn-primary" id="finBtn" type="button">Generate final report</button>
+        </div>
+        <p id="finProgress" class="muted" style="margin:10px 0 0"></p>`}
+      </div>
+      <div id="finOut"></div>`;
+  }
+  function finalLinks(L) {
+    const row = (name, desc, o, fmts) => o ? `<div class="final-doc"><div><b>${esc(name)}</b><span class="muted">${esc(desc)}</span></div><div class="final-btns">${fmts.map(f => o[f[0]] ? `<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="${esc(o[f[0]])}">${esc(f[1])}</a>` : '').join('')}</div></div>` : '';
+    const docF = [['docx', 'DOCX'], ['pdf', 'PDF'], ['view', 'Open in Google Docs']];
+    return `<div class="card final-docs"><h2>Your final documents</h2>
+      ${row('Final Reviewer Report', 'Human-validated comments, evidence matrix and reviewer letter', L.report, docF)}
+      ${row('Editor Report', 'Confidential summary, key risks and integrity notes', L.editor, docF)}
+      ${row('Revision Roadmap', 'Prioritised checklist for the authors', L.roadmap, docF)}
+      ${row('Evidence Matrix', 'Every finding with the AI decision and your decision', L.matrix, [['xlsx', 'XLSX'], ['view', 'Open in Google Sheets']])}
+      <div class="final-doc"><div><b>Audit file</b><span class="muted">Your decisions, the final text and any warnings (JSON)</span></div><div class="final-btns"><button class="btn btn-ghost btn-sm" id="finAudit" type="button">Download JSON</button></div></div>
+    </div>`;
+  }
+  function wireFinal(id, list, demo) {
+    if (demo || !$('#finBtn')) return;
+    const btn = $('#finBtn'), prog = $('#finProgress'), out = $('#finOut'), who = $('#finReviewer');
+    who.value = store.get('reviewer', '');
+    who.addEventListener('change', () => store.set('reviewer', who.value.trim()));
+    let timer = null, started = Date.now();
+    const counts = () => { const v = store.get('val:' + id, {}); return list.filter(a => v[a.id] && v[a.id].v).length + ' of ' + list.length + ' findings validated'; };
+    const show = d => {
+      if (!d || !d.found) { btn.disabled = false; prog.textContent = counts() + '.'; return ''; }
+      const age = Date.now() - new Date(d.updated_at || 0).getTime();
+      if (d.status === 'running' && age < 20 * 60 * 1000) { btn.disabled = true; prog.innerHTML = '<span class="spinner"></span> ' + esc(d.message || 'Working…'); return 'running'; }
+      btn.disabled = false; btn.textContent = 'Regenerate final report';
+      const lbl = d.status === 'complete' ? 'Last generated ' : 'Last attempt did not finish ';
+      prog.textContent = lbl + fmtDate(d.updated_at) + (d.message && d.status !== 'running' ? ' — ' + d.message : '') + '. ' + counts() + '.';
+      out.innerHTML = d.status === 'complete' && d.links ? finalLinks(d.links) : '';
+      const au = $('#finAudit');
+      if (au) au.addEventListener('click', () => apiGetJson(P.final, { id, include: 'audit' })
+        .then(x => download(id + '-final-audit.json', JSON.stringify(x.audit || {}, null, 2), 'application/json')).catch(e => toast(e.message)));
+      return d.status;
+    };
+    const poll = () => {
+      clearTimeout(timer);
+      if (!document.body.contains(btn)) return;
+      apiGetJson(P.final, { id }).then(d => {
+        if (show(d) === 'running' && Date.now() - started < 20 * 60 * 1000) timer = setTimeout(poll, 8000);
+      }).catch(e => { prog.textContent = e.message; btn.disabled = false; });
+    };
+    btn.addEventListener('click', () => {
+      const reviewer = who.value.trim(); store.set('reviewer', reviewer);
+      btn.disabled = true; out.innerHTML = ''; prog.innerHTML = '<span class="spinner"></span> Saving your decisions…';
+      const vals = store.get('val:' + id, {});
+      const save = Object.keys(vals).length ? apiPostForm(P.validate, { review_id: id, payload: JSON.stringify(vals), reviewer }).catch(() => null) : Promise.resolve();
+      save.then(() => apiPostForm(P.finalize, { review_id: id, reviewer }))
+        .then(() => { started = Date.now(); prog.innerHTML = '<span class="spinner"></span> Building the final report from your validated findings…'; timer = setTimeout(poll, 5000); })
+        .catch(e => { prog.textContent = e.message; btn.disabled = false; });
+    });
+    if (settings().key) poll(); else prog.textContent = 'Add your access key in Settings to generate the final report.';
   }
   function exportValidations(list, id, R) {
     const vals = store.get('val:' + id, {});

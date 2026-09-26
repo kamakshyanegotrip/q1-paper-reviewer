@@ -339,3 +339,12 @@ tr:last-child td { border-bottom: none; }
   .tab-panel { display: block !important; }
   main { padding: 0; }
 }
+
+/* final human-validated report */
+.final-form { display: flex; gap: 12px; align-items: flex-end; flex-wrap: wrap; margin-top: 8px; }
+.final-form .field { margin: 0; flex: 1 1 240px; }
+.final-doc { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--line); flex-wrap: wrap; }
+.final-docs h2 + .final-doc { border-top: 0; }
+.final-doc b { display: block; }
+.final-doc span { font-size: 13.5px; }
+.final-btns { display: flex; gap: 6px; flex-wrap: wrap; }
