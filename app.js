@@ -61,7 +61,7 @@
     ['classifying', 'Text extraction, study-design classification & manuscript inventory', 15],
     ['specialist_review', '7 independent specialist reviewers', 25],
     ['cross_validation', 'Evidence validation & cross-document consistency audit', 55],
-    ['reference_check', 'Reference verification on Crossref', 65],
+    ['reference_check', 'Reference verification (Crossref), citation and novelty checks (OpenAlex)', 65],
     ['adjudication', 'Adjudication of findings', 75],
     ['originality', 'Originality & writing-authenticity screen', 80],
     ['synthesis', 'Q1 synthesis report', 85],
@@ -379,6 +379,7 @@
     ];
     if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
     tabs.splice(3, 0, ['final', 'Final report']);
+    if (R.literature) tabs.splice(tabs.findIndex(t => t[0] === 'references') + 1, 0, ['literature', 'Literature & novelty']);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -408,6 +409,7 @@
       <section class="tab-panel" data-panel="final" hidden>${viewFinal(!!opts.demo)}</section>
       <section class="tab-panel" data-panel="audits" hidden>${viewAudits(R)}</section>
       <section class="tab-panel" data-panel="references" hidden>${viewReferences(R)}</section>
+      ${R.literature ? `<section class="tab-panel" data-panel="literature" hidden>${viewLiterature(R.literature)}</section>` : ''}
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
@@ -688,6 +690,64 @@
       + `<script type="application/json" id="refData">${esc(JSON.stringify(results.map(r => Object.assign({}, r, { tone: tone(r.status) }))))}</script>`;
   }
 
+  // ---- literature, novelty & citation accuracy (OpenAlex) ----
+  function viewLiterature(LT) {
+    const nv = LT.novelty || {}, X = LT.xref || {}, cc = LT.citation_check_counts || {}, rp = LT.refs_profile || {};
+    const NL = { CLEAR_ADVANCE: ['Clear advance', 'ok'], INCREMENTAL: ['Incremental', 'warn'], LARGELY_OVERLAPPING: ['Largely overlapping', 'bad'], UNCLEAR: ['Unclear', ''], NOT_RUN: ['Not run', ''] };
+    const GL = { SUPPORTED: ['Gap supported', 'ok'], PARTLY_SUPPORTED: ['Gap partly supported', 'warn'], NOT_SUPPORTED: ['Gap not supported', 'bad'], CANNOT_TELL: ['Gap: cannot tell', ''] };
+    const VL = { SUPPORTED: ['Supported', 'ok'], PARTIALLY_SUPPORTED: ['Partly supported', 'warn'], NOT_SUPPORTED: ['Not supported', 'bad'], CANNOT_VERIFY: ['Cannot verify from abstract', ''] };
+    const n = NL[nv.assessment] || [nv.assessment || '—', ''], g = GL[(nv.gap_check || {}).status] || ['Gap: —', ''];
+    const work = w => `<b>${esc(w.title)}</b> <span class="muted">(${esc(w.year)}${w.venue ? ', ' + esc(w.venue) : ''}${w.cited_by !== undefined ? ' · cited ' + esc(w.cited_by) + '×' : ''})</span>${w.url ? ` <a href="${esc(w.url)}" target="_blank" rel="noopener">open</a>` : ''}`;
+    const checks = arr(LT.citation_checks);
+    const order = { NOT_SUPPORTED: 0, PARTIALLY_SUPPORTED: 1, CANNOT_VERIFY: 2, SUPPORTED: 3 };
+    return `
+      <div class="card">
+        <div class="card-head"><h2>Novelty search</h2><small>OpenAlex · titles &amp; abstracts</small></div>
+        <p><span class="tag ${n[1]}">${esc(n[0])}</span> <span class="tag ${g[1]}">${esc(g[0])}</span></p>
+        ${nv.summary ? `<p>${esc(nv.summary)}</p>` : ''}
+        ${(nv.gap_check || {}).note ? `<p class="muted" style="font-size:14px"><b>Stated gap:</b> ${esc(nv.gap_check.note)}</p>` : ''}
+        ${arr(nv.closest_prior_work).length ? `<h3>Closest prior work</h3>${nv.closest_prior_work.map(w => `<div class="comment">${work(w)} ${w.cited_in_manuscript ? '<span class="tag ok">cited</span>' : '<span class="tag warn">not cited</span>'}
+          <p style="margin:6px 0 0;font-size:14px"><b>Overlap:</b> ${esc(w.overlap)}</p><div class="action"><b>What your paper adds:</b> ${esc(w.difference)}</div></div>`).join('')}` : ''}
+        ${arr(nv.missing_key_literature).length ? `<h3>Related works you do not cite</h3><ul class="clean">${nv.missing_key_literature.map(w => `<li>${work(w)}<br><span class="muted" style="font-size:14px">${esc(w.why)}</span></li>`).join('')}</ul>` : ''}
+        ${arr(nv.positioning_advice).length ? `<h3>Positioning advice</h3><ul class="clean">${nv.positioning_advice.map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}
+        ${arr(nv.searches).length ? `<p class="sources">Searches: ${nv.searches.map(esc).join(' · ')}</p>` : ''}
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>Citation accuracy</h2><small>judged from the cited work's abstract</small></div>
+        <div class="stats">
+          <div class="stat"><div class="n">${LT.pairs_checked || 0}</div><div class="l">Claims checked</div></div>
+          <div class="stat"><div class="n" style="color:var(--ok)">${cc.SUPPORTED || 0}</div><div class="l">Supported</div></div>
+          <div class="stat verify"><div class="n">${cc.PARTIALLY_SUPPORTED || 0}</div><div class="l">Partly supported</div></div>
+          <div class="stat critical"><div class="n">${cc.NOT_SUPPORTED || 0}</div><div class="l">Not supported</div></div>
+          <div class="stat"><div class="n">${cc.CANNOT_VERIFY || 0}</div><div class="l">Cannot verify</div></div>
+        </div>
+        ${checks.length ? checks.slice().sort((a, b) => (order[a.verdict] ?? 9) - (order[b.verdict] ?? 9)).map(c => { const v = VL[c.verdict] || [c.verdict, ''];
+          return `<div class="comment"><span class="tag ${v[1]}">${esc(v[0])}</span> <span class="muted" style="font-size:13px">${esc(c.citation)} → ${esc((c.cited_work || {}).title)} (${esc((c.cited_work || {}).year)})</span>
+            <blockquote class="ev"><span class="loc">${esc(c.location)}</span>${esc(c.claim)}</blockquote>
+            <p style="margin:8px 0 0;font-size:14px">${esc(c.explanation)}</p>${c.suggestion && c.verdict !== 'SUPPORTED' ? `<div class="action"><b>Fix:</b> ${esc(c.suggestion)}</div>` : ''}</div>`; }).join('')
+          : `<p class="muted">No claim could be paired with a cited work that has an abstract on OpenAlex${LT.pairs_skipped_no_abstract ? ` (${esc(LT.pairs_skipped_no_abstract)} skipped for lack of an abstract)` : ''}.</p>`}
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>In-text citations vs reference list</h2><small>${esc(X.style || '')}</small></div>
+        <div class="stats">
+          <div class="stat"><div class="n">${X.in_text_citations || 0}</div><div class="l">In-text citations</div></div>
+          <div class="stat"><div class="n">${X.unique_references_cited || 0}/${X.references_in_list || 0}</div><div class="l">References cited</div></div>
+          <div class="stat critical"><div class="n">${arr(X.missing_from_list).length}</div><div class="l">Missing from list</div></div>
+          <div class="stat verify"><div class="n">${arr(X.year_mismatches).length}</div><div class="l">Year mismatches</div></div>
+          <div class="stat"><div class="n">${arr(X.uncited_references).length}</div><div class="l">Never cited</div></div>
+        </div>
+        ${X.reliable === false ? '<p class="muted">Too few citations were recognised for a reliable check.</p>' : ''}
+        ${table(['Citation', 'Problem', 'Where'], [
+          ...arr(X.missing_from_list).map(x => [esc(x.citation), '<span class="no">not in reference list</span>', `<span class="muted">${esc(x.location)}</span> ${esc(x.sentence)}`]),
+          ...arr(X.year_mismatches).map(x => [esc(x.citation), `year differs — list has ${esc(arr(x.reference_years).join('/'))}`, `<span class="muted">${esc(x.location)}</span> ${esc(x.sentence)}`]),
+          ...arr(X.uncited_references).map(r => ['Ref #' + esc(r.ref_index), 'never cited in the text', esc(r.reference)])])}
+        ${arr(rp.retracted).length ? `<div class="warnings" style="margin-top:14px"><b>Retracted per OpenAlex:</b> ${rp.retracted.map(r => esc(r.title + ' (' + r.year + ')')).join('; ')}</div>` : ''}
+        <p class="muted" style="font-size:13px;margin-top:10px">${esc(rp.openalex_matched || 0)} of your references were found on OpenAlex (${esc(rp.with_abstract || 0)} with an abstract)${rp.median_cited_by !== null && rp.median_cited_by !== undefined ? `; median citations per reference ${esc(rp.median_cited_by)}` : ''}.</p>
+      </div>
+      ${arr(LT.errors).length ? `<div class="warnings"><b>Warnings:</b> ${LT.errors.map(esc).join(' · ')}</div>` : ''}
+      <div class="card"><h3>Limits</h3><ul class="clean">${arr(LT.caveats).map(x => `<li class="muted" style="font-size:14px">${esc(x)}</li>`).join('')}</ul></div>`;
+  }
+
   function renderOriginalityReport(R, opts) {
     const id = opts.id, M = R.meta || {}, IG = R.integrity || {};
     app.innerHTML = `
@@ -838,6 +898,7 @@
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
+          <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude Opus writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
           <li><div><b>You decide</b><span>Confirm, modify or reject each finding, tick off the roadmap, and export your validated list.</span></div></li>
