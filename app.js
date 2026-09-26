@@ -381,6 +381,7 @@
     tabs.splice(3, 0, ['final', 'Final report']);
     if (R.literature) tabs.splice(tabs.findIndex(t => t[0] === 'references') + 1, 0, ['literature', 'Literature & novelty']);
     if (R.modules) tabs.splice(tabs.findIndex(t => t[0] === 'references'), 0, ['stats', 'Statistics & tables']);
+    if (R.inventory && arr(R.inventory.hypotheses).length) tabs.splice(tabs.findIndex(t => t[0] === 'references'), 0, ['evidence', 'Evidence map']);
     app.innerHTML = `
       ${opts.demo ? '<div class="draft-banner"><b>Sample report</b> for a fictional manuscript — this is what you receive for your own paper.</div>' : '<div class="draft-banner"><b>AI-assisted draft.</b> Treat every finding as decision support: confirm, modify or reject it in <i>Validate findings</i> before revising.</div>'}
       ${arr(R.pipeline_warnings).length ? `<div class="warnings"><b>Pipeline warnings:</b> ${arr(R.pipeline_warnings).map(esc).join(' · ')}</div>` : ''}
@@ -412,6 +413,7 @@
       <section class="tab-panel" data-panel="references" hidden>${viewReferences(R)}</section>
       ${R.literature ? `<section class="tab-panel" data-panel="literature" hidden>${viewLiterature(R.literature)}</section>` : ''}
       ${R.modules ? `<section class="tab-panel" data-panel="stats" hidden>${viewModules(R.modules, R)}</section>` : ''}
+      ${R.inventory && arr(R.inventory.hypotheses).length ? `<section class="tab-panel" data-panel="evidence" hidden>${viewEvidenceMap(R)}</section>` : ''}
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
@@ -693,6 +695,102 @@
   }
 
   // ---- literature, novelty & citation accuracy (OpenAlex) ----
+  // ---- evidence map (Phase E): theory -> hypothesis -> measures -> result -> conclusion; objectives; claim -> evidence -> source ----
+  function buildEvidenceGraph(R) {
+    const inv = R.inventory || {}, cv = R.crossval || {}, M = R.modules || {}, LT = R.literature || {};
+    const low = s => String(s || '').toLowerCase();
+    const words = s => low(s).replace(/[^a-z0-9 ]+/g, ' ').split(/\s+/).filter(w => w.length > 3 && !['hospital', 'with', 'from', 'that', 'this', 'their', 'positively', 'negatively', 'influences', 'relationship', 'between', 'mediates', 'moderates'].includes(w));
+    const theories = arr(inv.theories), hyps = arr(inv.hypotheses), constructs = arr(inv.constructs);
+    const audit = arr(cv.hypothesis_audit), contra = arr(cv.contradictions), over = arr(cv.causal_overclaims);
+    const detF = arr((M.deterministic || {}).findings), align = cv.model_alignment || {};
+    const alignIssues = arr(align.issues).map(String);
+    const theoryWeak = alignIssues.filter(i => /theor|framework/i.test(i));
+    const breaks = [];
+    const brk = (where, level, text) => { breaks.push({ where, level, text }); return level; };
+    const cStatus = {};
+    constructs.forEach(c => {
+      const n = low(c.name), hits = detF.filter(f => /^TBL-(AVE|CR|LOADING|HTMT|FL|ALPHA|VIF)/.test(f.check_id || '') && (low(f.finding).includes(n) || low(f.finding).includes(n.replace(/^hospital /, ''))));
+      const orphan = alignIssues.filter(i => { if (!/orphan|no path|not connected|omitted/i.test(i)) return false; const pos = constructs.map(x => ({ x, p: low(i).indexOf(low(x.name).replace(/^hospital /, '')) })).filter(o => o.p >= 0).sort((u, v) => u.p - v.p); return pos.length && pos[0].x === c; });
+      const lvl = hits.some(f => f.severity === 'MAJOR' || f.severity === 'CRITICAL') ? 'bad' : (hits.length || orphan.length || !c.measurement_source) ? 'warn' : 'ok';
+      cStatus[c.name] = { level: lvl, notes: [...hits.map(f => f.finding), ...orphan, !c.measurement_source ? 'No measurement source given.' : ''].filter(Boolean) };
+    });
+    const rows = hyps.map(h => {
+      const hid = String(h.id || '').trim();
+      const hw = new Set(words(h.statement));
+      const cs = constructs.filter(c => words(c.name).some(w => hw.has(w)));
+      const a = audit.find(x => String(x.id || x.hypothesis || '').trim().toUpperCase() === hid.toUpperCase());
+      const hRe = new RegExp('\\b' + hid.replace(/[^A-Za-z0-9]/g, '') + '\\b', 'i');
+      const statIssues = detF.filter(f => hRe.test(f.finding));
+      const cont = contra.filter(c => hRe.test(c.description || '') || arr(c.quotes).some(q => hRe.test(q)));
+      // theory -> hypothesis
+      let tLink = theories.length ? (theoryWeak.length ? 'warn' : 'ok') : 'bad';
+      if (tLink === 'bad') brk(hid, 'bad', hid + ': no theory is named to derive this hypothesis from.');
+      else if (tLink === 'warn') brk(hid, 'warn', hid + ': the theory is named but not used to develop the hypothesis (' + theoryWeak[0] + ')');
+      // hypothesis -> measures
+      let mLink = !cs.length ? 'warn' : cs.some(c => (cStatus[c.name] || {}).level === 'bad') ? 'bad' : cs.some(c => (cStatus[c.name] || {}).level === 'warn') ? 'warn' : 'ok';
+      if (!cs.length) brk(hid, 'warn', hid + ': the constructs in this hypothesis could not be matched to measured constructs.');
+      else if (mLink === 'bad') brk(hid, 'bad', hid + ': a construct in this hypothesis fails measurement quality (' + cs.filter(c => cStatus[c.name].level === 'bad').map(c => c.name).join(', ') + ').');
+      // measures -> result
+      let rLink, resultTxt = '', resLevel;
+      if (!a) { rLink = 'bad'; resLevel = 'bad'; resultTxt = 'No result reported'; brk(hid, 'bad', hid + ': no test statistic reported for this hypothesis.'); }
+      else {
+        resultTxt = [a.reported_statistic, a.p_value ? 'p ' + (/^[<>=]/.test(String(a.p_value).trim()) ? '' : '= ') + a.p_value : '', a.ci ? 'CI ' + a.ci : ''].filter(Boolean).join(', ');
+        const auditSup = low(a.audit_supported);
+        resLevel = statIssues.some(f => f.severity === 'MAJOR' || f.severity === 'CRITICAL') ? 'bad' : auditSup.startsWith('yes') ? 'ok' : auditSup.startsWith('no') ? 'warn' : 'warn';
+        rLink = statIssues.length ? 'bad' : 'ok';
+        statIssues.forEach(f => brk(hid, 'bad', f.finding));
+      }
+      // result -> conclusion
+      const claimSup = low(a && a.author_claims_supported), auditSup = low(a && a.audit_supported);
+      let cLink = 'ok';
+      if (a && (a.mismatch || (claimSup.startsWith('yes') && !auditSup.startsWith('yes')))) { cLink = 'bad'; brk(hid, 'bad', hid + ': the paper concludes "supported" but the reported result does not support it' + (a.note ? ' (' + a.note + ')' : '') + '.'); }
+      else if (cont.length) { cLink = 'bad'; cont.forEach(c => brk(hid, 'bad', c.description)); }
+      const conclusion = a ? (claimSup.startsWith('yes') ? 'Reported as supported' : claimSup.startsWith('no') ? 'Reported as not supported' : 'Author conclusion unclear') : 'Not concluded';
+      return { id: hid, statement: h.statement, constructs: cs.map(c => ({ name: c.name, level: (cStatus[c.name] || {}).level || 'ok' })), result: resultTxt, resLevel, conclusion,
+        links: [tLink, mLink, rLink, cLink] };
+    });
+    if (over.length) brk('Design', 'bad', over.length + ' conclusion(s) use causal language that the design cannot support: "' + String(over[0].quote || '').slice(0, 140) + '"');
+    const objectives = arr(cv.objective_trace).map(o => ({ id: o.id, text: o.objective, steps: ['method', 'result', 'discussed', 'concluded'].map(k => ({ k, v: String(o[k] || '') })), issue: o.issue || '' }));
+    objectives.forEach(o => { const miss = o.steps.filter(s => /^no/i.test(s.v)); if (miss.length) brk(o.id || 'Objective', 'bad', (o.id || 'Objective') + ': not carried through to ' + miss.map(s => s.k).join(', ') + '.'); });
+    const claims = [
+      ...arr(cv.claim_evidence).map(c => ({ claim: c.claim, evidence: c.evidence, source: 'manuscript results', level: /^yes/i.test(c.supported) ? 'ok' : /^no/i.test(c.supported) ? 'bad' : 'warn', note: c.note || '' })),
+      ...arr(LT.citation_checks).map(c => ({ claim: c.claim, evidence: c.explanation, source: (c.citation || '') + ((c.cited_work || {}).title ? ' → ' + c.cited_work.title : ''), level: c.verdict === 'SUPPORTED' ? 'ok' : c.verdict === 'NOT_SUPPORTED' ? 'bad' : 'warn', note: c.verdict === 'CANNOT_VERIFY' ? 'cannot verify from abstract' : '' }))];
+    claims.filter(c => c.level === 'bad').forEach(c => brk('Claim', 'bad', 'Claim not supported by its evidence: "' + String(c.claim).slice(0, 140) + '"'));
+    return { theories, rows, objectives, claims, breaks, overclaims: over.length, alignIssues };
+  }
+
+  function viewEvidenceMap(R) {
+    const G = buildEvidenceGraph(R);
+    const col = l => l === 'bad' ? 'var(--critical)' : l === 'warn' ? 'var(--warn)' : 'var(--ok)';
+    const soft = l => l === 'bad' ? 'var(--critical-soft)' : l === 'warn' ? 'var(--warn-soft)' : 'var(--ok-soft)';
+    const node = (title, body, level) => `<div class="em-node" style="border-color:${level ? col(level) : 'var(--line)'};${level && level !== 'ok' ? 'background:' + soft(level) : ''}"><div class="em-t">${title}</div>${body ? `<div class="em-b">${body}</div>` : ''}</div>`;
+    const link = l => `<div class="em-link" style="color:${col(l)}" title="${l === 'ok' ? 'link holds' : l === 'warn' ? 'weak link' : 'broken link'}">${l === 'bad' ? '✕' : l === 'warn' ? '⋯' : '→'}</div>`;
+    const bad = G.breaks.filter(b => b.level === 'bad'), weak = G.breaks.filter(b => b.level === 'warn');
+    const theoryTxt = G.theories.length ? G.theories.map(t => esc(t.name)).join('<br>') : '<span class="no">No theory named</span>';
+    const rows = G.rows.map(r => `
+      ${node('Theory', theoryTxt, r.links[0] === 'bad' ? 'bad' : '')}${link(r.links[0])}
+      ${node(esc(r.id), esc(r.statement))}${link(r.links[1])}
+      ${node('Measures', r.constructs.length ? r.constructs.map(c => `<span class="tag ${c.level === 'ok' ? 'ok' : c.level === 'warn' ? 'warn' : 'bad'}" style="margin:2px 2px 0 0">${esc(c.name)}</span>`).join('') : '<span class="muted">not matched</span>', r.constructs.length ? '' : 'warn')}${link(r.links[2])}
+      ${node('Result', esc(r.result), r.resLevel)}${link(r.links[3])}
+      ${node('Conclusion', esc(r.conclusion), r.links[3] === 'bad' ? 'bad' : '')}`).join('');
+    return `
+      <div class="card">
+        <div class="card-head"><h2>Evidence map</h2><small>theory → hypothesis → measures → result → conclusion</small></div>
+        <p class="muted" style="font-size:14px">Each row follows one hypothesis through the paper. <span style="color:var(--ok)">→</span> the link holds, <span style="color:var(--warn)">⋯</span> it is weak, <span style="color:var(--critical)">✕</span> it is broken. Built from the cross-validation, table checks and statistics modules; the problems behind each broken link are already in your findings.</p>
+        <div class="stats">
+          <div class="stat critical"><div class="n">${bad.length}</div><div class="l">Broken links</div></div>
+          <div class="stat verify"><div class="n">${weak.length}</div><div class="l">Weak links</div></div>
+          <div class="stat"><div class="n">${G.rows.length}</div><div class="l">Hypotheses traced</div></div>
+          <div class="stat"><div class="n">${G.claims.length}</div><div class="l">Claims traced to sources</div></div>
+        </div>
+        ${G.rows.length ? `<div class="em-scroll"><div class="em-grid">${rows}</div></div>` : '<p class="muted">No hypotheses were found, so the hypothesis chain cannot be drawn.</p>'}
+        ${G.overclaims ? `<div class="warnings" style="margin-top:12px"><b>Design → conclusion:</b> ${G.overclaims} conclusion(s) use causal language the study design cannot support (see Consistency audits).</div>` : ''}
+      </div>
+      ${G.breaks.length ? `<div class="card"><div class="card-head"><h2>Broken and weak links</h2><small>${G.breaks.length}</small></div><ul class="clean">${[...bad, ...weak].map(b => `<li><span class="tag ${b.level === 'bad' ? 'bad' : 'warn'}">${b.level === 'bad' ? 'Broken' : 'Weak'}</span> <b>${esc(b.where)}</b> — ${esc(b.text)}</li>`).join('')}</ul></div>` : ''}
+      ${G.objectives.length ? `<div class="card"><div class="card-head"><h2>Objectives followed through the paper</h2></div>${table(['Objective', 'Method', 'Result', 'Discussed', 'Concluded'], G.objectives.map(o => [`<b>${esc(o.id)}</b> ${esc(o.text)}${o.issue ? `<br><span class="muted" style="font-size:13px">${esc(o.issue)}</span>` : ''}`, ...o.steps.map(s => /^yes/i.test(s.v) ? '<span class="yes">✓</span>' : /^no/i.test(s.v) ? '<span class="no">✕</span>' : `<span class="partial">${esc(s.v || '—')}</span>`)]))}</div>` : ''}
+      ${G.claims.length ? `<div class="card"><div class="card-head"><h2>Claims → evidence → source</h2></div>${table(['Claim', 'Evidence', 'Source', ''], G.claims.map(c => [esc(c.claim), esc(c.evidence) + (c.note ? `<br><span class="muted" style="font-size:13px">${esc(c.note)}</span>` : ''), esc(c.source), c.level === 'ok' ? '<span class="yes">Holds</span>' : c.level === 'bad' ? '<span class="no">Broken</span>' : '<span class="partial">Weak</span>']))}</div>` : ''}`;
+  }
+
   // ---- statistics & tables (Phase D: table extraction, deterministic recomputation, specialist modules) ----
   function viewModules(M, R) {
     const VD = { SOUND: ['Sound', 'ok'], MINOR_CONCERNS: ['Minor concerns', 'warn'], MAJOR_CONCERNS: ['Major concerns', 'bad'], NOT_APPLICABLE: ['Not applicable', ''], FAILED: ['Did not run', 'bad'], UNCLEAR: ['Unclear', ''] };
@@ -929,6 +1027,7 @@
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
+          <li><div><b>Evidence map</b><span>Each hypothesis is traced from theory to measures, result and conclusion, each objective through method, results, discussion and conclusion, and each claim to the evidence or source behind it. Broken and weak links are shown in red and amber.</span></div></li>
           <li><div><b>Table &amp; statistics modules</b><span>Every table is transcribed and the numbers are re-checked by code (AVE and composite reliability recomputed from loadings, t against p, confidence intervals against "supported", HTMT, VIF, fit). In Full and Forensic modes, specialist modules then go deeper where your design needs them: SEM approach, measurement model, regression, mediation, moderation, multigroup analysis, qualitative rigour and a reporting-guideline audit.</span></div></li>
           <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
