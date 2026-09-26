@@ -159,7 +159,7 @@
       <div class="hero-copy">
         <div class="eyebrow">Pre-submission review</div>
         <h1>See your manuscript the way a Q1 reviewer will — before you submit.</h1>
-        <p class="lead">Upload your paper and a panel of seven independent AI specialist reviewers evaluates it against an adaptive checklist of 110+ Scopus Q1 criteria. Every finding must quote your manuscript, numbers and references are checked by rule and against Crossref, and an adjudicator removes duplicates and unsupported claims.</p>
+        <p class="lead">Upload your paper and a panel of seven independent AI specialist reviewers evaluates it against an adaptive checklist drawn from a library of up to 300 Scopus Q1 criteria. Every finding must quote your manuscript, numbers and references are checked by rule and against Crossref, and an adjudicator removes duplicates and unsupported claims.</p>
         <div class="pill-row">
           <span class="pill"><b>Evidence-first</b> findings quote your text</span>
           <span class="pill"><b>No fake score</b> diagnostic profile instead</span>
@@ -199,9 +199,9 @@
         </div>
         <div class="field" style="margin-bottom:6px"><span>Review type</span></div>
         <div class="modes">
-          <div class="mode"><input type="radio" name="review_mode" id="m1" value="QUICK"><label for="m1"><b>Quick</b><span>~40 core checks · 15 refs · fastest</span></label></div>
-          <div class="mode"><input type="radio" name="review_mode" id="m2" value="FULL_Q1" checked><label for="m2"><b>Full Q1</b><span>~90–120 checks · 40 refs · recommended</span></label></div>
-          <div class="mode"><input type="radio" name="review_mode" id="m3" value="FORENSIC"><label for="m3"><b>Forensic</b><span>All checks · 80 refs · deepest</span></label></div>
+          <div class="mode"><input type="radio" name="review_mode" id="m1" value="QUICK"><label for="m1"><b>Quick</b><span>Core checks only · 15 refs · fastest</span></label></div>
+          <div class="mode"><input type="radio" name="review_mode" id="m2" value="FULL_Q1" checked><label for="m2"><b>Full Q1</b><span>Core + extended checks · 40 refs · recommended</span></label></div>
+          <div class="mode"><input type="radio" name="review_mode" id="m3" value="FORENSIC"><label for="m3"><b>Forensic</b><span>Every applicable check · 80 refs · deepest</span></label></div>
           <div class="mode"><input type="radio" name="review_mode" id="m4" value="ORIGINALITY"><label for="m4"><b>Originality only</b><span>Copying & AI-writing screen · ~2–4 min · cheapest</span></label></div>
         </div>
         <details class="more">
@@ -444,7 +444,7 @@
           <div class="stat major"><div class="n">${sev.major || 0}</div><div class="l">Major</div></div>
           <div class="stat minor"><div class="n">${sev.minor || 0}</div><div class="l">Minor</div></div>
           <div class="stat verify"><div class="n">${sev.needs_verification || 0}</div><div class="l">Need your verification</div></div>
-          <div class="stat"><div class="n">${R.checklist_size || '—'}</div><div class="l">Checks applied</div></div>
+          <div class="stat"><div class="n">${R.checklist_size || '—'}</div><div class="l">Checks applied${R.checklist_total ? ' <span class="muted">of ' + esc(R.checklist_total) + ' in library</span>' : ''}</div></div>
         </div>
       </div>
       <div class="card"><h2>Executive assessment</h2>${String(S.executive_assessment || 'Not available.').split(/\n+/).map(p => `<p>${esc(p)}</p>`).join('')}</div>
@@ -892,7 +892,7 @@
         <ol class="pipeline">
           <li><div><b>Extraction</b><span>Text is extracted with page markers so every finding can point to a location. Scanned PDFs are transcribed by Gemini; DOCX files are converted through Google Docs.</span></div></li>
           <li><div><b>Classification & inventory</b><span>Gemini identifies the design (e.g. cross-sectional survey + PLS-SEM, interviews, systematic review) and lists objectives, hypotheses, constructs, claims, numbers and references.</span></div></li>
-          <li><div><b>Adaptive checklist</b><span>From a library of 110+ Q1 criteria, only the checks relevant to your design and chosen depth are selected — SEM checks for SEM papers, COREQ/SRQR for qualitative work, PRISMA for reviews.</span></div></li>
+          <li><div><b>Adaptive checklist</b><span>From a library of up to 300 Q1 criteria (kept in a database and editable without code changes), only the checks relevant to your design and chosen depth are selected — SEM checks for SEM papers, COREQ/SRQR for qualitative work, PRISMA for reviews.</span></div></li>
           <li><div><b>Seven independent specialist reviewers</b><span>Gemini reviewers for theory, method, statistics, literature, integrity, reporting and the editor view work separately (no groupthink), each returning structured findings with verbatim quotes.</span></div></li>
           <li><div><b>Evidence validator</b><span>Each quote is matched against your manuscript. A MAJOR or CRITICAL finding without a verifiable quote is held for human verification instead of being reported as fact.</span></div></li>
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
