@@ -19,6 +19,7 @@ OLLAMA = os.environ.get("OLLAMA_URL", "http://q1-ollama:11434").rstrip("/")
 MODEL = os.environ.get("Q1_LLM_MODEL", "qwen3:4b")
 NUM_CTX = int(os.environ.get("Q1_LLM_CTX", "32768"))
 MAX_PREDICT = int(os.environ.get("Q1_LLM_MAX_OUTPUT", "8192"))
+SYNTH_MAX = int(os.environ.get("Q1_LLM_MAX_OUTPUT_SYNTH", str(MAX_PREDICT)))  # final report may be longer
 KEEP_ALIVE = os.environ.get("Q1_LLM_KEEP_ALIVE", "15m")   # model leaves RAM after this idle time
 CALL_TIMEOUT = float(os.environ.get("Q1_LLM_TIMEOUT", "5400"))  # seconds per call
 
@@ -52,8 +53,9 @@ def fit(system: str, user: str, predict: int):
     return system, user, True
 
 
-async def run(system: str, user: str, max_out: int, temperature: float, want_json: bool):
-    predict = max(256, min(int(max_out or MAX_PREDICT), MAX_PREDICT))
+async def run(system: str, user: str, max_out: int, temperature: float, want_json: bool, cap: int = 0):
+    cap = cap or MAX_PREDICT
+    predict = max(256, min(int(max_out or cap), cap))
     system, user, trimmed = fit(system or "", user or "", predict)
     if want_json:
         user = user + "\n\nReturn only valid JSON. No markdown, no commentary."
@@ -84,7 +86,7 @@ async def run(system: str, user: str, max_out: int, temperature: float, want_jso
 @app.get("/health")
 async def health():
     try:
-        async with httpx.AsyncClient(timeout=10) as c:
+        async with httpx.AsyncClient(timeout=5) as c:
             tags = (await c.get(f"{OLLAMA}/api/tags")).json()
             ps = (await c.get(f"{OLLAMA}/api/ps")).json()
         names = [m.get("name") for m in tags.get("models", [])]
@@ -99,6 +101,11 @@ async def health():
 async def gemini(model_action: str, req: Request):
     """Gemini generateContent shape in and out."""
     check(req)
+    if model_action.startswith("skip"):
+        # optional step switched off in private mode: answer instantly with an empty result
+        return {"candidates": [{"content": {"role": "model", "parts": [{"text": "{}"}]}, "finishReason": "STOP"}],
+                "usageMetadata": {"promptTokenCount": 0, "candidatesTokenCount": 0, "totalTokenCount": 0},
+                "modelVersion": "skipped-in-private-mode", "private_mode": {"skipped": True}}
     b = await req.json()
     sys_parts = ((b.get("systemInstruction") or {}).get("parts") or [])
     system = "\n\n".join(p.get("text", "") for p in sys_parts if isinstance(p, dict))
@@ -141,7 +148,7 @@ async def anthropic(req: Request):
                     raise HTTPException(status_code=400, detail="Private mode cannot read images or PDFs directly.")
     user = "\n\n".join(texts)
     want_json = "json" in (system[-3000:] + user[-3000:]).lower()
-    text, pin, pout, done, trimmed = await run(system, user, b.get("max_tokens"), b.get("temperature"), want_json)
+    text, pin, pout, done, trimmed = await run(system, user, b.get("max_tokens"), b.get("temperature"), want_json, SYNTH_MAX)
     return {
         "id": "msg_local_%d" % int(time.time() * 1000), "type": "message", "role": "assistant",
         "model": "local:" + MODEL, "content": [{"type": "text", "text": text}],
