@@ -226,7 +226,12 @@
           <label class="field"><span>Anything the reviewers should know?</span><textarea name="author_notes" placeholder="e.g. This is a revised version; data collection was in 2025"></textarea></label>
           <label class="field"><span>Also email the report to</span><input type="email" name="email" placeholder="you@university.edu"></label>
         </details>
-        <label class="consent"><input type="checkbox" id="consent"> <span>I am authorised to process this manuscript with third-party AI services (Google Gemini, Anthropic Claude). I will not upload manuscripts I received in confidence as a journal reviewer.</span></label>
+        <details class="more" id="privMore">
+          <summary>Privacy &amp; storage (optional)</summary>
+          <label class="consent"><input type="checkbox" name="private_mode" value="true" id="privateMode"> <span><b>Private mode</b> — only the AI model running on our own server reads the manuscript. Nothing is sent to Gemini, Claude or the originality phrase search (reference and literature look-ups still run, using titles and keywords only). Slower (often 1–3 hours) and less thorough; scanned PDFs are not supported.</span></label>
+          <label class="consent"><input type="checkbox" name="cleanup" value="true" id="cleanupAfter"> <span><b>Delete working files after the review</b> — the stored copy of the manuscript and the server's run data are removed once the report is ready, to keep space free. The report is kept; you can delete it later from the Dashboard.</span></label>
+        </details>
+        <label class="consent"><input type="checkbox" id="consent"> <span id="consentText">I am authorised to process this manuscript with third-party AI services (Google Gemini, Anthropic Claude). I will not upload manuscripts I received in confidence as a journal reviewer.</span></label>
         <p class="form-error" id="formError" role="alert"></p>
         <button class="btn btn-primary btn-lg" type="submit" id="submitBtn" style="width:100%">Start Q1 review</button>
       </form>
@@ -242,6 +247,11 @@
       const ps = $('#prevSelect');
       if (ps) {
         history.all().filter(r => r.status === 'complete').slice(0, 40).forEach(r => { const o = document.createElement('option'); o.value = r.id; o.textContent = (r.title || r.id).slice(0, 70) + ' · ' + r.id; ps.appendChild(o); });
+        const pm = $('#privateMode'), ct = $('#consentText'), cu = $('#cleanupAfter');
+        const syncPriv = () => { ct.textContent = pm.checked ? 'I am authorised to have this manuscript reviewed on the review server (private mode: no third-party AI service reads it). I will not upload manuscripts I received in confidence as a journal reviewer unless the journal allows it.' : 'I am authorised to process this manuscript with third-party AI services (Google Gemini, Anthropic Claude). I will not upload manuscripts I received in confidence as a journal reviewer.'; };
+        pm.checked = !!store.get('privateMode', false); cu.checked = !!store.get('cleanupAfter', false);
+        if (pm.checked || cu.checked) $('#privMore').open = true;
+        pm.addEventListener('change', syncPriv); syncPriv();
         const pre = store.get('prefillPrev', ''); if (pre) { store.del('prefillPrev'); $('#revMore').open = true; if (![...ps.options].some(o => o.value === pre)) { const o = document.createElement('option'); o.value = pre; o.textContent = pre; ps.appendChild(o); } ps.value = pre; }
       }
     } catch (e) { /* optional prefill */ }
@@ -277,6 +287,7 @@
       const prevSel = ($('#prevSelect') && $('#prevSelect').value) || '';
       if (prevSel && !String(fd.get('previous_review_id') || '').trim()) fd.set('previous_review_id', prevSel);
       store.set('reviewerName', String(fd.get('reviewer_name') || ''));
+      store.set('privateMode', !!fd.get('private_mode')); store.set('cleanupAfter', !!fd.get('cleanup'));
       const dsf = ($('#datasetInput') && $('#datasetInput').files[0]) || null;
       if (dsf) {
         const dext = (dsf.name.split('.').pop() || '').toLowerCase();
@@ -289,7 +300,7 @@
         const res = await fetch(s.api.replace(/\/$/, '') + CFG.submitPath, { method: 'POST', body: fd });
         const data = await res.json().catch(() => null);
         if (!res.ok || !data || !data.ok) throw new Error((data && data.error) || ('Submission failed (' + res.status + ')'));
-        history.upsert({ id: data.review_id, title: fd.get('paper_title') || (file ? file.name : mUrl.split('?')[0].split('/').pop() || 'Linked manuscript'), journal: fd.get('target_journal'), mode: fd.get('review_mode'), submitted_at: new Date().toISOString(), status: 'queued' });
+        history.upsert({ id: data.review_id, private_mode: !!fd.get('private_mode'), title: fd.get('paper_title') || (file ? file.name : mUrl.split('?')[0].split('/').pop() || 'Linked manuscript'), journal: fd.get('target_journal'), mode: fd.get('review_mode'), submitted_at: new Date().toISOString(), status: 'queued' });
         toast('Submitted — review ' + data.review_id + ' started');
         location.hash = '#/review/' + encodeURIComponent(data.review_id);
       } catch (ex) {
@@ -355,13 +366,15 @@
     const sevMini = sc => sc ? `<span class="sev sev-CRITICAL" title="Critical">${sc.critical || 0}</span> <span class="sev sev-MAJOR" title="Major">${sc.major || 0}</span> <span class="sev sev-MINOR" title="Minor">${sc.minor || 0}</span>` : '';
     const stTag = r => r.status === 'complete' ? `<span class="tag ok">${esc(READINESS[r.readiness] || 'Complete')}</span>` : r.status === 'failed' ? `<span class="tag bad" title="${esc(r.error)}">Failed</span>` : '<span class="tag warn">In progress</span>';
     const row = (r, first) => `<tr>
-      <td>${first ? `<b>${esc(r.title || r.review_id)}</b>` : '<span class="muted">↳ earlier version</span>'}<div class="muted" style="font-size:12px">${esc(r.target_journal)} · ${esc(r.mode)}${r.reviewer_name ? ' · ' + esc(r.reviewer_name) : ''}${isAdmin && r.owner ? ' · key: ' + esc(r.owner) : ''}${r.source && r.source !== 'webapp' ? ' · via ' + esc(r.source) : ''}</div></td>
+      <td>${first ? `<b>${esc(r.title || r.review_id)}</b>` : '<span class="muted">↳ earlier version</span>'}<div class="muted" style="font-size:12px">${esc(r.target_journal)} · ${esc(r.mode)}${r.reviewer_name ? ' · ' + esc(r.reviewer_name) : ''}${isAdmin && r.owner ? ' · key: ' + esc(r.owner) : ''}${r.source && r.source !== 'webapp' ? ' · via ' + esc(r.source) : ''}${r.private_mode ? ' · <span class="tag" title="Reviewed by the local model only">Private</span>' : ''}${r.cleaned_at ? ' · <span class="muted" title="Manuscript copy and run data deleted">files deleted</span>' : (r.cleanup === 'files' ? ' · <span class="muted">files will be deleted</span>' : '')}</div></td>
       <td><span class="tag">v${esc(r.version)}</span></td>
       <td>${stTag(r)}</td><td>${sevMini(r.severity_counts)}</td>
       <td style="white-space:nowrap">${esc(fmtDate(r.submitted_at))}</td>
       <td style="white-space:nowrap"><a class="btn btn-ghost btn-sm" href="#/review/${encodeURIComponent(r.review_id)}">Open</a>
         ${r.manuscript_link ? `<a class="btn btn-ghost btn-sm" target="_blank" rel="noopener" href="${esc(r.manuscript_link)}">File</a>` : ''}
-        ${first && r.status === 'complete' ? `<button class="btn btn-ghost btn-sm" data-rereview="${esc(r.review_id)}">Review revision</button>` : ''}</td></tr>`;
+        ${first && r.status === 'complete' ? `<button class="btn btn-ghost btn-sm" data-rereview="${esc(r.review_id)}">Review revision</button>` : ''}
+        ${!r.cleaned_at && r.cleanup !== 'files' ? `<button class="btn btn-ghost btn-sm" data-clean="files" data-id="${esc(r.review_id)}" title="Delete the stored manuscript copy and run data; keep the report">Free space</button>` : ''}
+        <button class="btn btn-ghost btn-sm" data-clean="all" data-id="${esc(r.review_id)}" title="Delete this review, its report and all files">Delete</button></td></tr>`;
     app.innerHTML = `
       <div class="card-head" style="margin-bottom:10px"><h1 style="margin:0">Dashboard</h1><a class="btn btn-primary" href="#/">New review</a></div>
       <p class="muted" style="margin-top:-4px">Signed in as <b>${esc((d.me && d.me.name) || '—')}</b>${isAdmin ? ' · admin' : ''}. ${isAdmin ? 'Admins see every review; ' : ''}reviews are grouped by manuscript, newest version first.</p>
@@ -376,6 +389,15 @@
         <tbody>${glist.map(g => g.map((r, i) => row(r, i === 0)).join('')).join('')}</tbody></table></div>` : '<div class="card empty" style="margin-top:14px">No reviews yet for this key.</div>'}`;
     $$('[data-scope]').forEach(b => b.addEventListener('click', () => { store.set('dashScope', b.dataset.scope); renderDashboard(); }));
     $$('[data-rereview]').forEach(b => b.addEventListener('click', () => { store.set('prefillPrev', b.dataset.rereview); location.hash = '#/'; }));
+    $$('[data-clean]').forEach(b => b.addEventListener('click', async () => {
+      const all = b.dataset.clean === 'all';
+      if (!confirmInline(b, all ? 'This deletes the review, its report and all files for good.' : 'This deletes the manuscript copy and run data; the report stays.')) return;
+      b.disabled = true;
+      try { const r = await apiPostForm('/q1-review-cleanup', { review_id: b.dataset.id, scope: all ? 'all' : 'files' }); toast(r.message || 'Done');
+        if (all) history.remove(b.dataset.id);
+        setTimeout(renderDashboard, 1500);
+      } catch (e) { toast(e.message); b.disabled = false; }
+    }));
   }
 
   // ---------- ADMIN: access keys ----------
@@ -555,7 +577,7 @@
           <div class="report-meta">
             <span>Target: <b>${esc(M.target_journal || '—')}</b></span><span>${esc(M.article_type || '')}</span>
             <span>Mode: ${esc(M.mode || '')}</span><span>${esc(M.word_count || '?')} words${M.ocr_used ? ' · OCR' : ''}</span>
-            <span class="mono">${esc(R.review_id || id)}</span><span>${esc(fmtDate(R.generated_at))}</span>${V && V.version > 1 ? `<span class="tag">Version ${esc(V.version)}</span>` : ''}${M.reviewer_name ? `<span>Reviewer: ${esc(M.reviewer_name)}</span>` : ''}
+            <span class="mono">${esc(R.review_id || id)}</span><span>${esc(fmtDate(R.generated_at))}</span>${V && V.version > 1 ? `<span class="tag">Version ${esc(V.version)}</span>` : ''}${M.reviewer_name ? `<span>Reviewer: ${esc(M.reviewer_name)}</span>` : ''}${M.private_mode ? '<span class="tag" title="Reviewed by the local model on the review server; no manuscript text was sent to Gemini or Claude">Private mode</span>' : ''}
           </div>
         </div>
         <div class="report-actions">
@@ -1197,6 +1219,7 @@
           <li><div><b>Literature &amp; novelty engine</b><span>OpenAlex is searched for the closest recent and most-cited related studies to judge novelty, test the stated gap and list related work you do not cite. Every in-text citation is matched to the reference list, and a sample of claims is checked against the abstract of the work they cite.</span></div></li>
           <li><div><b>Originality & writing screen</b><span>Sampled sentences are searched as exact phrases in OpenAlex and Europe PMC to catch verbatim overlap with published work, and a writing review flags generic, template-like passages and a missing AI-use disclosure. No AI % score is given. An optional Copyleaks integration adds a full similarity percentage and AI detector. Choose <b>Originality only</b> on the form to run just this screen in a few minutes.</span></div></li>
           <li><div><b>Adjudication & synthesis</b><span>An adjudicator merges duplicates and dismisses findings the manuscript contradicts; Claude writes the final assessment, diagnostic profile, comments, roadmap and reviewer letter.</span></div></li>
+          <li><div><b>Private mode &amp; clean-up</b><span>Tick <i>Private mode</i> to have the manuscript read only by an open AI model running on our own server, so no text reaches Gemini, Claude or any outside search; it is slower and less thorough, so treat it as a first pass. Tick <i>Delete working files</i> (or use <i>Free space</i> on the Dashboard) to remove the stored manuscript copy and the server's run data once the report is ready; <i>Delete</i> removes the whole review. In the Drive inbox, add [PRIVATE] or [CLEAN] to the file name.</span></div></li>
           <li><div><b>Versions, team keys & intake</b><span>Upload a file or paste a Drive/Dropbox link, give the journal's guideline URL to fetch its requirements, and mark a submission as a revision of an earlier review to get a check-by-check "resolved / still open / new" comparison. Each co-author or student can have their own revocable key, every manuscript is filed in a Google Drive folder, and a dashboard lists all reviews by manuscript and version. Files dropped into the Drive inbox folder are reviewed automatically.</span></div></li>
           <li><div><b>You decide</b><span>Confirm, modify or reject each finding, tick off the roadmap, and export your validated list.</span></div></li>
         </ol>
