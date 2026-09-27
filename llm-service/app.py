@@ -9,12 +9,17 @@ n8n "Normalize" steps work unchanged. Nothing leaves the server.
 No public port: only containers on the n8n Docker network can reach it.
 Optional extra lock: set env Q1_LLM_TOKEN and send header x-q1-token.
 """
-import os, time, hmac, logging
+import os, time, hmac, logging, asyncio
 import httpx
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 
 TOKEN = os.environ.get("Q1_LLM_TOKEN", "")
+# Backend: "ollama" (a local model) or "openai" (an OpenAI-compatible API such as Groq with Zero Data Retention)
+BACKEND = os.environ.get("Q1_LLM_BACKEND", "ollama").lower()
+API_BASE = os.environ.get("Q1_LLM_API_BASE", "https://api.groq.com/openai/v1").rstrip("/")
+API_KEY = os.environ.get("Q1_LLM_API_KEY", "")
+REASONING = os.environ.get("Q1_LLM_REASONING", "medium")  # low | medium | high (gpt-oss)
 OLLAMA = os.environ.get("OLLAMA_URL", "http://q1-ollama:11434").rstrip("/")
 MODEL = os.environ.get("Q1_LLM_MODEL", "qwen3:4b")
 NUM_CTX = int(os.environ.get("Q1_LLM_CTX", "32768"))
@@ -56,9 +61,11 @@ def fit(system: str, user: str, predict: int):
 async def run(system: str, user: str, max_out: int, temperature: float, want_json: bool, cap: int = 0):
     cap = cap or MAX_PREDICT
     predict = max(256, min(int(max_out or cap), cap))
-    system, user, trimmed = fit(system or "", user or "", predict)
+    system, user, trimmed = fit(system or "", user or "", predict + (6000 if BACKEND == "openai" else 0))
     if want_json:
         user = user + "\n\nReturn only valid JSON. No markdown, no commentary."
+    if BACKEND == "openai":
+        return await run_openai(system, user, predict, temperature, want_json, trimmed)
     body = {
         "model": MODEL,
         "messages": ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}],
@@ -83,8 +90,64 @@ async def run(system: str, user: str, max_out: int, temperature: float, want_jso
     return text, pin, pout, done, trimmed
 
 
+async def run_openai(system, user, predict, temperature, want_json, trimmed):
+    """OpenAI-compatible chat completions (Groq). Retries politely on rate limits."""
+    body = {
+        "model": MODEL,
+        "messages": ([{"role": "system", "content": system}] if system else []) + [{"role": "user", "content": user}],
+        # reasoning tokens share the output budget, so leave headroom for them
+        "max_completion_tokens": min(predict + 6000, 65536),
+        "temperature": float(temperature if temperature is not None else 0.2),
+        "reasoning_effort": REASONING,
+        "include_reasoning": False,
+    }
+    if want_json:
+        body["response_format"] = {"type": "json_object"}
+    headers = {"Authorization": "Bearer " + API_KEY}
+    t0 = time.time()
+    r = None
+    async with httpx.AsyncClient(timeout=CALL_TIMEOUT) as c:
+        for attempt in range(8):
+            r = await c.post(f"{API_BASE}/chat/completions", json=body, headers=headers)
+            if r.status_code == 400 and want_json and "json" in r.text.lower() and "response_format" in body:
+                body.pop("response_format")  # model produced invalid JSON; retry once in free-text mode
+                continue
+            if r.status_code in (429, 500, 502, 503) and attempt < 7:
+                wait = r.headers.get("retry-after")
+                try:
+                    wait = min(float(wait), 90.0)
+                except (TypeError, ValueError):
+                    wait = min(5.0 * (attempt + 1), 60.0)
+                log.info("api busy %s, waiting %.0fs", r.status_code, wait)
+                await asyncio.sleep(wait)
+                continue
+            break
+    if r.status_code != 200:
+        log.info("api error %s", r.status_code)
+        raise HTTPException(status_code=502, detail="private model API error %s: %s" % (r.status_code, r.text[:300]))
+    d = r.json()
+    ch = (d.get("choices") or [{}])[0]
+    text = (ch.get("message") or {}).get("content") or ""
+    u = d.get("usage") or {}
+    pin, pout = u.get("prompt_tokens", 0), u.get("completion_tokens", 0)
+    done = "length" if ch.get("finish_reason") == "length" else "stop"
+    log.info("call ok: in=%s out=%s trimmed=%s %.0fs", pin, pout, trimmed, time.time() - t0)
+    return text, pin, pout, done, trimmed
+
+
 @app.get("/health")
 async def health():
+    if BACKEND == "openai":
+        try:
+            async with httpx.AsyncClient(timeout=8) as c:
+                r = await c.get(f"{API_BASE}/models", headers={"Authorization": "Bearer " + API_KEY})
+            if r.status_code != 200:
+                return JSONResponse({"ok": False, "backend": "api", "error": "API returned %s" % r.status_code}, status_code=503)
+            names = [m.get("id") for m in r.json().get("data", [])]
+            return {"ok": MODEL in names, "backend": "api", "model": MODEL, "num_ctx": NUM_CTX,
+                    "max_output": MAX_PREDICT, "key_set": bool(API_KEY)}
+        except Exception as e:
+            return JSONResponse({"ok": False, "error": str(e)[:200]}, status_code=503)
     try:
         async with httpx.AsyncClient(timeout=5) as c:
             tags = (await c.get(f"{OLLAMA}/api/tags")).json()
@@ -162,6 +225,8 @@ async def anthropic(req: Request):
 async def unload(req: Request):
     """Free the model's RAM now (it is reloaded automatically on the next call)."""
     check(req)
+    if BACKEND == "openai":
+        return {"ok": True, "unloaded": "nothing to unload (online API)"}
     async with httpx.AsyncClient(timeout=60) as c:
         await c.post(f"{OLLAMA}/api/generate", json={"model": MODEL, "keep_alive": 0})
     return {"ok": True, "unloaded": MODEL}
