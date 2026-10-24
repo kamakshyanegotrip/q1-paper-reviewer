@@ -107,6 +107,198 @@
     return apiJson(await fetch(apiUrl(path), { method: 'POST', body }));
   }
 
+
+  // ---------- Journal finder ----------
+  const JF_PATH = CFG.journalFinderPath || '/q1-journal-finder';
+  const QORD = { Q1: 1, Q2: 2, Q3: 3, Q4: 4 };
+  function jfFiltersFromForm(f) {
+    return {
+      require_scopus: f.get('jf_scopus') === 'on', require_wos: f.get('jf_wos') === 'on',
+      wos_collections: ['SSCI', 'SCIE', 'ESCI', 'AHCI'].filter(c => f.get('jf_c_' + c) === 'on'),
+      min_quartile: f.get('jf_q') || '', abdc_min: f.get('jf_abdc') || '', oa: f.get('jf_oa') || 'any',
+      max_apc_usd: f.get('jf_apc') || '', prefer_publishers: f.get('jf_prefer') || '', exclude_publishers: f.get('jf_exclude') || '',
+      exclude_journals: f.get('jf_exj') || '', include_discontinued: f.get('jf_disc') === 'on'
+    };
+  }
+  function jfFilterFields(F) {
+    F = F || store.get('jfFilters', {}) || {};
+    const sel = (name, opts, v) => `<select name="${name}">${opts.map(o => `<option value="${esc(o[0])}"${String(v || '') === o[0] ? ' selected' : ''}>${esc(o[1])}</option>`).join('')}</select>`;
+    const cb = (name, label, on) => `<label class="consent" style="margin:4px 0"><input type="checkbox" name="${name}"${on ? ' checked' : ''}> <span>${label}</span></label>`;
+    const wc = arr(F.wos_collections);
+    return `
+      <div class="grid-2">
+        <label class="field"><span>Lowest SJR quartile <i>Scopus-based</i></span>${sel('jf_q', [['', 'Any'], ['Q1', 'Q1 only'], ['Q2', 'Q1–Q2'], ['Q3', 'Q1–Q3'], ['Q4', 'Q1–Q4 (ranked only)']], F.min_quartile)}</label>
+        <label class="field"><span>Lowest ABDC rating <i>business &amp; management</i></span>${sel('jf_abdc', [['', 'Any'], ['A*', 'A* only'], ['A', 'A* or A'], ['B', 'A* to B'], ['C', 'Any ABDC-listed']], F.abdc_min)}</label>
+        <label class="field"><span>Access model</span>${sel('jf_oa', [['any', 'Any'], ['subscription', 'Subscription / hybrid (no compulsory fee)'], ['oa', 'Fully open access'], ['diamond', 'Open access with no fee (diamond)']], F.oa)}</label>
+        <label class="field"><span>Highest publication fee (APC) <i>USD, open-access journals</i></span><input type="number" name="jf_apc" min="0" step="50" value="${esc(F.max_apc_usd == null ? '' : F.max_apc_usd)}" placeholder="no limit"></label>
+      </div>
+      ${cb('jf_scopus', '<b>Must be indexed in Scopus</b> (current source list)', F.require_scopus)}
+      ${cb('jf_wos', '<b>Must be indexed in Web of Science</b>', F.require_wos)}
+      <div style="margin:2px 0 8px 26px;font-size:14px">Only these collections: ${['SSCI', 'SCIE', 'ESCI', 'AHCI'].map(c => `<label style="margin-right:12px"><input type="checkbox" name="jf_c_${c}"${wc.includes(c) ? ' checked' : ''}> ${c}</label>`).join('')}</div>
+      ${cb('jf_disc', 'Also show journals that Scopus has discontinued', F.include_discontinued)}
+      <div class="grid-2">
+        <label class="field"><span>Prefer publishers <i>comma-separated</i></span><input type="text" name="jf_prefer" value="${esc(Array.isArray(F.prefer_publishers) ? F.prefer_publishers.join(', ') : F.prefer_publishers || '')}" placeholder="e.g. Elsevier, Taylor & Francis"></label>
+        <label class="field"><span>Exclude publishers <i>comma-separated</i></span><input type="text" name="jf_exclude" value="${esc(Array.isArray(F.exclude_publishers) ? F.exclude_publishers.join(', ') : F.exclude_publishers || '')}" placeholder="e.g. MDPI, Frontiers"></label>
+      </div>
+      <label class="field"><span>Exclude journals <i>one per line, exact names</i></span><textarea name="jf_exj" rows="2" placeholder="Journals that already rejected the paper">${esc(Array.isArray(F.exclude_journals) ? F.exclude_journals.join('\n') : F.exclude_journals || '')}</textarea></label>`;
+  }
+
+  function renderJournals() {
+    const pre = store.get('jfPrefill', null); store.del('jfPrefill');
+    const last = store.get('jfLast', null);
+    const v = pre || (last && last.query) || {};
+    app.innerHTML = `
+      <section class="card">
+        <div class="card-head" style="margin-bottom:6px"><h1 style="margin:0">Journal finder</h1><small>free sources only</small></div>
+        <p class="muted" style="margin-top:0">Finds the journals that publish the papers most similar to yours (OpenAlex), then checks each one against the Scopus source list, SCImago quartiles, Web of Science lists, the ABDC list and DOAJ, and adds a short AI note on scope fit.</p>
+        ${settings().key ? '' : '<div class="keywarn">Add your access key in <a href="#" id="jfKey">Settings</a> first.</div>'}
+        <form id="jfForm" novalidate>
+          <label class="field"><span>Working title</span><input type="text" name="title" required value="${esc(v.title || '')}" placeholder="Title of your paper"></label>
+          <label class="field"><span>Abstract <i>recommended</i></span><textarea name="abstract" rows="6" placeholder="Paste the abstract for a much better match">${esc(v.abstract || '')}</textarea></label>
+          <div class="grid-2">
+            <label class="field"><span>Keywords <i>separate with ; or ,</i></span><input type="text" name="keywords" value="${esc(v.keywords || '')}" placeholder="medical tourism; service quality; PLS-SEM"></label>
+            <label class="field"><span>Research field</span><input type="text" name="field" value="${esc(v.field || 'Tourism & Hospitality')}"></label>
+            <label class="field"><span>Journal you have in mind <i>optional, checked too</i></span><input type="text" name="target_journal" value="${esc(v.target_journal || '')}" placeholder="e.g. Tourism Management"></label>
+            <label class="field"><span>How many suggestions</span><select name="max_results">${[10, 15, 20, 30].map(n => `<option${n === (v.max_results || 15) ? ' selected' : ''}>${n}</option>`).join('')}</select></label>
+          </div>
+          <details class="more" open><summary>Filters</summary>${jfFilterFields(last && last.filters)}</details>
+          <label class="consent"><input type="checkbox" name="private" id="jfPrivate"> <span><b>Private mode</b> — the abstract is read only by the private model (Groq, zero data retention); only short search phrases go to OpenAlex.</span></label>
+          <p class="form-error" id="jfError" role="alert"></p>
+          <button class="btn btn-primary btn-lg" type="submit" id="jfBtn" style="width:100%">Find journals</button>
+        </form>
+      </section>
+      <div id="jfOut">${last && last.result ? viewJournalFit(last.result) : ''}</div>`;
+    const k = $('#jfKey'); if (k) k.addEventListener('click', e => { e.preventDefault(); openSettings(); });
+    if (last && last.result) wireJournalFit(last.result, $('#jfOut'));
+    $('#jfForm').addEventListener('submit', async e => {
+      e.preventDefault();
+      const f = new FormData(e.target); const btn = $('#jfBtn'); const err = $('#jfError'); err.textContent = '';
+      if (!settings().key) { openSettings('Add your access key first.'); return; }
+      const title = String(f.get('title') || '').trim();
+      if (title.length < 8 && String(f.get('abstract') || '').trim().length < 40) { err.textContent = 'Give at least a working title (or an abstract).'; return; }
+      const filters = jfFiltersFromForm(f); store.set('jfFilters', filters);
+      const query = { title, abstract: f.get('abstract') || '', keywords: f.get('keywords') || '', field: f.get('field') || '', target_journal: f.get('target_journal') || '', max_results: parseInt(f.get('max_results'), 10) || 15 };
+      btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Searching OpenAlex and the journal lists… (about 20–40 seconds)';
+      try {
+        const r = await apiPostForm(JF_PATH, Object.assign({}, query, { private: f.get('private') === 'on' ? 'true' : '', filters: JSON.stringify(filters) }));
+        store.set('jfLast', { query, filters, result: r });
+        $('#jfOut').innerHTML = viewJournalFit(r); wireJournalFit(r, $('#jfOut'));
+        $('#jfOut').scrollIntoView({ behavior: 'smooth' });
+      } catch (x) { err.textContent = x.message || 'Search failed'; }
+      btn.disabled = false; btn.textContent = 'Find journals';
+    });
+  }
+
+  function jfChips(j) {
+    const c = [];
+    const sc = j.scopus || {};
+    if (sc.indexed === true) c.push(sc.active ? '<span class="tag ok" title="In the current Scopus source list">Scopus</span>' : `<span class="tag bad" title="${esc(sc.discontinued || 'Inactive in Scopus')}">Scopus: discontinued</span>`);
+    else if (sc.indexed === false) c.push('<span class="tag" title="Not in the Scopus source list">Not in Scopus</span>');
+    else c.push('<span class="tag" title="Scopus list not loaded yet">Scopus: ?</span>');
+    if (j.sjr && j.sjr.quartile) c.push(`<span class="tag ${j.sjr.quartile === 'Q1' ? 'ok' : j.sjr.quartile === 'Q2' ? '' : 'warn'}" title="SCImago ${esc(j.sjr.year || '')}: SJR ${esc(j.sjr.sjr)} · h-index ${esc(j.sjr.h_index)}">SJR ${esc(j.sjr.quartile)}</span>`);
+    const w = arr((j.wos || {}).collections);
+    if (w.length) w.forEach(x => c.push(`<span class="tag ${x === 'ESCI' ? '' : 'ok'}" title="Web of Science ${esc(x)}">WoS ${esc(x)}</span>`));
+    if (j.abdc) c.push(`<span class="tag ${/A/.test(j.abdc.rating) ? 'ok' : ''}" title="ABDC 2025 rating">ABDC ${esc(j.abdc.rating)}</span>`);
+    const oa = j.oa || {};
+    if (oa.diamond) c.push('<span class="tag ok" title="Open access with no author fee">OA · no fee</span>');
+    else if (oa.is_oa) c.push(`<span class="tag warn" title="Fully open access">OA${oa.apc_usd != null ? ' · APC $' + esc(Math.round(oa.apc_usd)) : oa.apc_doaj ? ' · ' + esc(oa.apc_doaj) : ''}</span>`);
+    else c.push('<span class="tag" title="Subscription or hybrid journal">Subscription / hybrid</span>');
+    if (oa.in_doaj) c.push('<span class="tag" title="Listed in DOAJ">DOAJ</span>');
+    return c.join(' ');
+  }
+  function viewJournalFit(JF, opts) {
+    opts = opts || {};
+    if (!JF || !JF.ok) return `<div class="card empty">${esc((JF && JF.error) || 'No journal suggestions yet.')}</div>`;
+    const L = JF.lists || {};
+    const li = (k, n) => { const m = L[k]; return m && m.rows ? `<span class="tag ok" title="${esc(m.file || '')}">${n}: ${esc(m.rows)} · ${esc(fmtDate(m.refreshed_at).split(',')[0])}</span>` : `<span class="tag">${n}: not loaded</span>`; };
+    const wos = Object.keys(L).filter(k => k.startsWith('wos'));
+    const jcard = (j, isT) => `
+      <div class="comment jf-row" data-q="${esc(j.sjr && QORD[j.sjr.quartile] || 9)}" data-cite="${esc((j.metrics || {}).two_yr_mean_citedness || 0)}" data-fit="${esc(j.fit_score)}">
+        <div style="display:flex;gap:12px;justify-content:space-between;align-items:flex-start;flex-wrap:wrap">
+          <div style="min-width:240px;flex:1">
+            <div style="font-size:16px">${isT ? '<span class="tag warn">Your choice</span> ' : `<b class="muted">#${esc(j.rank)}</b> `}<b>${esc(j.title)}</b></div>
+            <div class="muted" style="font-size:13px">${esc(j.publisher || '—')}${arr(j.issns).length ? ' · ISSN ' + j.issns.map(esc).join(', ') : ''}${j.country ? ' · ' + esc(j.country) : ''}</div>
+            <div style="margin-top:6px">${jfChips(j)}</div>
+          </div>
+          <div style="text-align:right;min-width:150px">
+            <div style="font:600 22px var(--sans)">${esc(j.fit_score)}<span class="muted" style="font-size:13px"> / 100</span></div>
+            <div class="muted" style="font-size:12px">${esc(j.fit_label)} fit${j.ai_fit ? ' · AI: ' + esc(j.ai_fit) : ''}</div>
+            <div class="bar" style="margin:4px 0 0;height:6px"><div style="width:${Math.max(3, Math.min(100, +j.fit_score || 0))}%"></div></div>
+          </div>
+        </div>
+        ${j.reason ? `<p style="margin:8px 0 0;font-size:14px">${esc(j.reason)}</p>` : ''}
+        ${j.caution ? `<p class="muted" style="margin:4px 0 0;font-size:13px"><b>Watch out:</b> ${esc(j.caution)}</p>` : ''}
+        ${isT && j.note ? `<p class="muted" style="margin:4px 0 0;font-size:13px">${esc(j.note)}</p>` : ''}
+        ${isT && arr(j.excluded_because).length ? `<p style="margin:4px 0 0;font-size:13px"><span class="tag bad">Does not meet your filters</span> ${j.excluded_because.map(esc).join('; ')}</p>` : ''}
+        <div class="muted" style="font-size:13px;margin-top:6px">${esc(j.matched_papers || 0)} similar paper${j.matched_papers === 1 ? '' : 's'} since ${new Date().getFullYear() - 6}${(j.metrics || {}).two_yr_mean_citedness != null ? ' · 2-yr mean citations ' + esc(j.metrics.two_yr_mean_citedness) : ''}${(j.metrics || {}).h_index ? ' · h-index ' + esc(j.metrics.h_index) : ''}${(j.oa || {}).weeks_to_publish ? ' · ~' + esc(j.oa.weeks_to_publish) + ' weeks to publication (DOAJ)' : ''}${(j.oa || {}).review ? ' · ' + esc(j.oa.review) : ''}</div>
+        ${arr(j.sample_titles).length ? `<details style="margin-top:6px"><summary style="font-size:13px;cursor:pointer">Similar papers it published</summary><ul class="clean" style="font-size:13px">${j.sample_titles.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
+        ${j.sjr && j.sjr.categories ? `<p class="muted" style="font-size:12px;margin:4px 0 0">SJR categories: ${esc(j.sjr.categories)}</p>` : ''}
+        <p style="font-size:13px;margin:6px 0 0">${[['homepage', 'Journal site'], ['scopus', 'Scopus'], ['sjr', 'SCImago'], ['mjl', 'Web of Science (MJL)'], ['doaj', 'DOAJ'], ['openalex', 'OpenAlex']].filter(l => (j.links || {})[l[0]]).map(l => `<a href="${esc(j.links[l[0]])}" target="_blank" rel="noopener">${l[1]}</a>`).join(' · ')}</p>
+      </div>`;
+    const ex = Object.entries(JF.excluded || {});
+    return `
+      <div class="card">
+        <div class="card-head"><h2>${opts.title || 'Best-fit journals'}</h2><small>${esc(JF.considered || 0)} journals considered · ${esc(JF.similar_papers_found || 0)} similar papers</small></div>
+        <p style="font-size:13px;margin-top:0">${li('scopus', 'Scopus')} ${li('sjr', 'SJR')} ${wos.length ? wos.map(k => li(k, 'WoS ' + (k.split(':')[1] || ''))).join(' ') : '<span class="tag">WoS: not loaded</span>'} ${li('abdc', 'ABDC')} <span class="tag ok">OpenAlex · DOAJ live</span></p>
+        ${ex.length ? `<p class="muted" style="font-size:13px">Removed by your filters: ${ex.map(([k, n]) => esc(k) + ' (' + n + ')').join(' · ')}</p>` : ''}
+        <div class="toolbar"><span class="muted" style="font-size:13px">Sort:</span>
+          <button class="btn btn-sm btn-primary" data-jfsort="fit">Best fit</button><button class="btn btn-sm btn-ghost" data-jfsort="q">SJR quartile</button><button class="btn btn-sm btn-ghost" data-jfsort="cite">Citations</button>
+          <button class="btn btn-sm btn-ghost" data-jfcsv>Export CSV</button>${opts.rerun ? '<button class="btn btn-sm btn-ghost" data-jfrerun>Change filters</button>' : ''}</div>
+        ${JF.target ? jcard(JF.target, true) : ''}
+        <div class="jf-list">${arr(JF.journals).map(j => jcard(j, false)).join('') || '<p class="muted">No journal passed your filters. Loosen a filter and try again.</p>'}</div>
+        ${arr(JF.notes).length ? `<ul class="clean muted" style="font-size:13px;margin-top:10px">${JF.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul>` : ''}
+        ${arr((JF.query || {}).search_phrases).length ? `<p class="sources">Searches: ${JF.query.search_phrases.map(esc).join(' · ')}</p>` : ''}
+      </div>`;
+  }
+  function wireJournalFit(JF, root) {
+    if (!root || !JF || !JF.ok) return;
+    $$('[data-jfsort]', root).forEach(b => b.addEventListener('click', () => {
+      $$('[data-jfsort]', root).forEach(x => { x.classList.toggle('btn-primary', x === b); x.classList.toggle('btn-ghost', x !== b); });
+      const list = $('.jf-list', root); const rows = $$('.jf-row', list);
+      const k = b.dataset.jfsort;
+      rows.sort((a, c) => k === 'q' ? (+a.dataset.q - +c.dataset.q) || (+c.dataset.fit - +a.dataset.fit) : k === 'cite' ? (+c.dataset.cite - +a.dataset.cite) : (+c.dataset.fit - +a.dataset.fit)).forEach(r => list.appendChild(r));
+    }));
+    const csv = $('[data-jfcsv]', root);
+    if (csv) csv.addEventListener('click', () => {
+      const head = ['Rank', 'Journal', 'Publisher', 'ISSN', 'Fit score', 'AI fit', 'Reason', 'Caution', 'Scopus', 'SJR quartile', 'SJR', 'WoS', 'ABDC', 'Open access', 'APC USD', 'DOAJ', '2-yr mean citations', 'h-index', 'Similar papers', 'Homepage'];
+      const rows = arr(JF.journals).map(j => [j.rank, j.title, j.publisher, arr(j.issns).join(' '), j.fit_score, j.ai_fit, j.reason, j.caution, (j.scopus || {}).indexed === true ? ((j.scopus.active ? 'Active' : 'Discontinued')) : (j.scopus || {}).indexed === false ? 'No' : 'Unknown', j.sjr ? j.sjr.quartile : '', j.sjr ? j.sjr.sjr : '', arr((j.wos || {}).collections).join(' '), j.abdc ? j.abdc.rating : '', (j.oa || {}).diamond ? 'Diamond' : (j.oa || {}).is_oa ? 'Yes' : 'No', (j.oa || {}).apc_usd, (j.oa || {}).in_doaj ? 'Yes' : '', (j.metrics || {}).two_yr_mean_citedness, (j.metrics || {}).h_index, j.matched_papers, j.homepage]);
+      download('journal-finder.csv', [head].concat(rows).map(r => r.map(csvCell).join(',')).join('\n'), 'text/csv');
+    });
+  }
+
+  // Journal fit tab inside a review: uses result.journal_fit when the engine produced it, otherwise runs on demand
+  function jfPaperFromReview(R) {
+    const M = R.meta || {}, I = R.inventory || {};
+    const kw = arr(I.keywords).length ? I.keywords.join('; ') : (M.keywords || '');
+    return { title: M.title || '', abstract: I.abstract || R.abstract || M.abstract || '', keywords: kw, field: M.field || '', article_type: M.article_type || '', target_journal: M.target_journal || '', max_results: 15 };
+  }
+  function viewJournalFitTab(R, id) {
+    const JF = R.journal_fit || store.get('jf:' + id, null);
+    if (JF && JF.ok) return `<div id="jfTab">${viewJournalFit(JF, { rerun: true })}</div>`;
+    return `<div id="jfTab"><div class="card"><div class="card-head"><h2>Best-fit journals</h2><small>free sources only</small></div>
+      <p class="muted" style="margin-top:0">Find the journals that publish papers most like this one, checked against the Scopus list, SCImago quartiles, Web of Science, ABDC and DOAJ.</p>
+      ${JF && JF.error ? `<p class="form-error">${esc(JF.error)}</p>` : ''}
+      <button class="btn btn-primary" id="jfRun">Find best-fit journals</button> <button class="btn btn-ghost" data-jfrerun>Open with filters</button></div></div>`;
+  }
+  function wireJournalFitTab(R, id, demo) {
+    const root = $('#jfTab'); if (!root) return;
+    const JF = R.journal_fit || store.get('jf:' + id, null);
+    if (JF && JF.ok) wireJournalFit(JF, root);
+    const open = () => { store.set('jfPrefill', jfPaperFromReview(R)); location.hash = '#/journals'; };
+    $$('[data-jfrerun]', root).forEach(b => b.addEventListener('click', open));
+    const run = $('#jfRun', root);
+    if (run) run.addEventListener('click', async () => {
+      if (demo) { open(); return; }
+      if (!settings().key) { openSettings('Add your access key first.'); return; }
+      run.disabled = true; run.innerHTML = '<span class="spinner"></span> Searching… (about 20–40 seconds)';
+      try {
+        const p = jfPaperFromReview(R);
+        const r = await apiPostForm(JF_PATH, Object.assign({}, p, { private: (R.meta || {}).private_mode ? 'true' : '', filters: JSON.stringify(store.get('jfFilters', {}) || {}) }));
+        store.set('jf:' + id, r); root.outerHTML = viewJournalFitTab(R, id); wireJournalFitTab(R, id, demo);
+      } catch (x) { run.disabled = false; run.textContent = 'Find best-fit journals'; toast(x.message || 'Search failed'); }
+    });
+  }
+
   // ---------- router ----------
   function route() {
     stopPolling();
@@ -119,6 +311,7 @@
     if (parts[0] === 'review' && parts[1]) return renderReview(decodeURIComponent(parts[1]));
     if (parts[0] === 'demo') return renderDemo();
     if (parts[0] === 'how') return renderHow();
+    if (parts[0] === 'journals') return renderJournals();
     if (parts[0] === 'dashboard') return renderDashboard();
     if (parts[0] === 'admin') return renderAdmin();
     renderHome();
@@ -558,7 +751,7 @@
     const tabs = [
       ['overview', 'Overview'], ['comments', 'Comments', arr(S.major_comments).length + arr(S.minor_comments).length],
       ['findings', 'Validate findings', actionable.length], ['audits', 'Consistency audits'], ['references', 'References', (R.references && R.references.summary && R.references.summary.checked) || 0],
-      ['roadmap', 'Revision roadmap'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
+      ['journals', 'Best-fit journals', R.journal_fit && R.journal_fit.ok ? arr(R.journal_fit.journals).length : undefined], ['roadmap', 'Revision roadmap'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
     ];
     if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
     tabs.splice(3, 0, ['final', 'Final report']);
@@ -601,6 +794,7 @@
       ${R.modules ? `<section class="tab-panel" data-panel="stats" hidden>${viewModules(R.modules, R)}</section>` : ''}
       ${R.inventory && arr(R.inventory.hypotheses).length ? `<section class="tab-panel" data-panel="evidence" hidden>${viewEvidenceMap(R)}</section>` : ''}
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
+      <section class="tab-panel" data-panel="journals" hidden>${viewJournalFitTab(R, id)}</section>
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
       <section class="tab-panel" data-panel="checks" hidden>${viewChecksShell(findings)}</section>`;
@@ -613,6 +807,7 @@
     wireFinal(id, actionable, !!opts.demo);
     wireChecks(findings);
     wireRoadmap(id);
+    wireJournalFitTab(R, id, !!opts.demo);
     const letterCopy = $('#copyLetter'); if (letterCopy) letterCopy.addEventListener('click', () => { navigator.clipboard.writeText(S.reviewer_letter || '').then(() => toast('Letter copied'), () => toast('Copy failed')); });
     $('#printBtn').addEventListener('click', () => window.print());
     $('#exportJson').addEventListener('click', () => download((R.review_id || id) + '.json', JSON.stringify(R, null, 2), 'application/json'));
@@ -1212,6 +1407,7 @@
           <li><div><b>Evidence validator</b><span>Each quote is matched against your manuscript. A MAJOR or CRITICAL finding without a verifiable quote is held for human verification instead of being reported as fact.</span></div></li>
           <li><div><b>Rule-based number & language audit</b><span>Deterministic checks for inconsistent sample sizes, p = .000, reliability/validity/fit thresholds, Harman-only CMB, Fornell-Larcker-only validity, causal verbs in cross-sectional designs and missing ethics statements.</span></div></li>
           <li><div><b>Cross-validation engine</b><span>Objective → result tracing, hypothesis ↔ result comparison, table ↔ text and section-to-section contradiction checks.</span></div></li>
+          <li><div><b>Best-fit journals (free sources)</b><span>OpenAlex finds the journals that published the papers most similar to yours in the last six years. Each is checked against the current Scopus source list, SCImago (SJR) quartiles, the Web of Science collection lists (SSCI, SCIE, AHCI, ESCI), the ABDC journal list and DOAJ (open access, fees, time to publication), filtered by your quartile, rank, fee and publisher choices, and given a short AI note on scope fit. Also available on its own under <a href="#/journals">Journal finder</a>.</span></div></li>
           <li><div><b>Reference verification</b><span>References are checked against Crossref for existence, metadata mismatches, missing DOIs and retraction notices; your title is searched for possible prior publication.</span></div></li>
           <li><div><b>Evidence map</b><span>Each hypothesis is traced from theory to measures, result and conclusion, each objective through method, results, discussion and conclusion, and each claim to the evidence or source behind it. Broken and weak links are shown in red and amber.</span></div></li>
           <li><div><b>Table &amp; statistics modules</b><span>Every table is transcribed and the numbers are re-checked by code (AVE and composite reliability recomputed from loadings, t against p, confidence intervals against "supported", HTMT, VIF, fit). In Full and Forensic modes, specialist modules then go deeper where your design needs them: SEM approach, measurement model, regression, mediation, moderation, multigroup analysis, qualitative rigour and a reporting-guideline audit.</span></div></li>

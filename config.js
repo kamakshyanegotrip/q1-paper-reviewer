@@ -4,6 +4,7 @@ window.Q1_CONFIG = {
   apiBase: 'https://n8n.assignover.in/webhook',
   submitPath: '/q1-review-submit',
   statusPath: '/q1-review-status',
+  journalFinderPath: '/q1-journal-finder',
   pollSeconds: 12,
   maxFileMB: 15
 };

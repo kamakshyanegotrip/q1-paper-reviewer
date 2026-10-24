@@ -123,7 +123,7 @@ code, .mono { font-family: var(--mono); font-size: .9em; }
 .field > span { font-weight: 600; font-size: 14px; }
 .field > span em { font-style: normal; font-weight: 500; color: var(--critical); font-size: 12px; margin-left: 4px; }
 .field > span i { font-style: normal; font-weight: 400; color: var(--ink-3); font-size: 12px; margin-left: 4px; }
-input[type=text], input[type=email], input[type=url], input[type=password], select, textarea {
+input[type=text], input[type=number], input[type=email], input[type=url], input[type=password], select, textarea {
   width: 100%; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink);
   font: 15px var(--sans);
 }
