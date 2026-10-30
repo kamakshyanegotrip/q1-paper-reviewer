@@ -233,7 +233,7 @@
         <div class="muted" style="font-size:13px;margin-top:6px">${esc(j.matched_papers || 0)} similar paper${j.matched_papers === 1 ? '' : 's'} since ${new Date().getFullYear() - 6}${(j.metrics || {}).two_yr_mean_citedness != null ? ' · 2-yr mean citations ' + esc(j.metrics.two_yr_mean_citedness) : ''}${(j.metrics || {}).h_index ? ' · h-index ' + esc(j.metrics.h_index) : ''}${(j.oa || {}).weeks_to_publish ? ' · ~' + esc(j.oa.weeks_to_publish) + ' weeks to publication (DOAJ)' : ''}${(j.oa || {}).review ? ' · ' + esc(j.oa.review) : ''}</div>
         ${arr(j.sample_titles).length ? `<details style="margin-top:6px"><summary style="font-size:13px;cursor:pointer">Similar papers it published</summary><ul class="clean" style="font-size:13px">${j.sample_titles.map(t => `<li>${esc(t)}</li>`).join('')}</ul></details>` : ''}
         ${j.sjr && j.sjr.categories ? `<p class="muted" style="font-size:12px;margin:4px 0 0">SJR categories: ${esc(j.sjr.categories)}</p>` : ''}
-        <p style="font-size:13px;margin:6px 0 0">${[['homepage', 'Journal site'], ['scopus', 'Scopus'], ['sjr', 'SCImago'], ['mjl', 'Web of Science (MJL)'], ['doaj', 'DOAJ'], ['openalex', 'OpenAlex']].filter(l => (j.links || {})[l[0]]).map(l => `<a href="${esc(j.links[l[0]])}" target="_blank" rel="noopener">${l[1]}</a>`).join(' · ')}</p>
+        <p style="font-size:13px;margin:6px 0 0">${[['homepage', 'Journal site'], ['scopus', 'Scopus'], ['sjr', 'SCImago'], ['mjl', 'Web of Science (MJL)'], ['doaj', 'DOAJ'], ['openalex', 'OpenAlex']].filter(l => (j.links || {})[l[0]]).map(l => `<a href="${esc(j.links[l[0]])}" target="_blank" rel="noopener">${l[1]}</a>`).join(' · ')}${isT ? '' : ` · <button class="btn btn-sm btn-ghost" data-usetarget="${esc(j.title)}" style="padding:2px 8px">Use as target journal</button>`}</p>
       </div>`;
     const ex = Object.entries(JF.excluded || {});
     return `
@@ -257,6 +257,11 @@
       const list = $('.jf-list', root); const rows = $$('.jf-row', list);
       const k = b.dataset.jfsort;
       rows.sort((a, c) => k === 'q' ? (+a.dataset.q - +c.dataset.q) || (+c.dataset.fit - +a.dataset.fit) : k === 'cite' ? (+c.dataset.cite - +a.dataset.cite) : (+c.dataset.fit - +a.dataset.fit)).forEach(r => list.appendChild(r));
+    }));
+    $$('[data-usetarget]', root).forEach(b => b.addEventListener('click', () => {
+      store.set('jfUseTarget', b.dataset.usetarget);
+      toast('Target journal set: ' + b.dataset.usetarget);
+      location.hash = '#/';
     }));
     const csv = $('[data-jfcsv]', root);
     if (csv) csv.addEventListener('click', () => {
@@ -384,7 +389,7 @@
         <input type="file" id="fileInput" accept=".pdf,.docx,.txt,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,text/plain" hidden>
         <label class="field" style="margin-top:-4px"><span>…or paste a link to the manuscript <i>Google Drive, Dropbox or a direct PDF/DOCX link</i></span><input type="url" name="manuscript_url" id="manuscriptUrl" placeholder="https://drive.google.com/file/d/…" autocomplete="off"></label>
         <div class="grid-2">
-          <label class="field"><span>Target journal <em>required</em></span><input type="text" name="target_journal" required placeholder="e.g. Tourism Management"></label>
+          <label class="field"><span>Target journal <i>optional — leave blank if undecided</i></span><input type="text" name="target_journal" id="targetJournal" placeholder="e.g. Tourism Management" autocomplete="off"><span class="muted" id="tjChips" style="font-size:13px;margin-top:6px;display:block"></span></label>
           <label class="field"><span>Paper title <i>optional</i></span><input type="text" name="paper_title" placeholder="Detected automatically"></label>
           <label class="field"><span>Reviewer name <i>optional</i></span><input type="text" name="reviewer_name" id="reviewerName" placeholder="Shown on the report and dashboard" maxlength="120"></label>
           <label class="field"><span>Article type</span>
@@ -394,6 +399,7 @@
             </select></label>
           <label class="field"><span>Research field</span><input type="text" name="field" value="Tourism & Hospitality"></label>
         </div>
+        <p style="margin:-4px 0 12px"><button type="button" class="btn btn-sm btn-ghost" id="tjFind">Find journals for this paper</button> <span class="muted" style="font-size:13px">Best-fit suggestions from the journal finder, with the Scopus, SJR, WoS and ABDC status of each. Optional.</span></p>
         <div class="field" style="margin-bottom:6px"><span>Review type</span></div>
         <div class="modes">
           <div class="mode"><input type="radio" name="review_mode" id="m1" value="QUICK"><label for="m1"><b>Quick</b><span>Core checks only · 15 refs · fastest</span></label></div>
@@ -465,6 +471,8 @@
     ['dragleave', 'drop'].forEach(ev => dz.addEventListener(ev, e => { e.preventDefault(); dz.classList.remove('drag'); }));
     dz.addEventListener('drop', e => setFile(e.dataTransfer.files[0]));
 
+    wireTargetJournal(form, err);
+
     form.addEventListener('submit', async (e) => {
       e.preventDefault(); err.textContent = '';
       const s = settings();
@@ -473,7 +481,6 @@
       if (!file && !mUrl) { err.textContent = 'Please choose your manuscript file or paste a link to it.'; return; }
       if (!file && !/^https?:\/\//i.test(mUrl)) { err.textContent = 'The manuscript link must start with http:// or https://'; return; }
       const fd = new FormData(form);
-      if (!String(fd.get('target_journal') || '').trim()) { err.textContent = 'Please enter the target journal.'; form.target_journal.focus(); return; }
       if (!$('#consent').checked) { err.textContent = 'Please confirm the data-processing statement.'; return; }
       fd.append('access_key', s.key);
       if (file) { fd.append('manuscript', file, file.name); fd.delete('manuscript_url'); }
@@ -503,6 +510,35 @@
     });
   }
 
+
+  // ---------- Target journal: live status + link to the journal finder ----------
+  let tjTimer = null;
+  function wireTargetJournal(form, err) {
+    const inp = $('#targetJournal'), out = $('#tjChips'), btn = $('#tjFind');
+    if (!inp || !out || !btn) return;
+    const pick = store.get('jfUseTarget', '');
+    if (pick) { store.del('jfUseTarget'); inp.value = pick; }
+    const show = async () => {
+      const q = inp.value.trim();
+      if (q.length < 3) { out.innerHTML = ''; return; }
+      try {
+        const r = await apiGetJson(CFG.journalLookupPath || '/q1-journal-lookup', { q });
+        if (inp.value.trim() !== q) return; // a newer search has started
+        const list = arr(r.matches);
+        out.innerHTML = !r.ok ? '' : list.length
+          ? `<b>${esc(list[0].title)}</b> ${jfChips(list[0])}${list.length > 1 ? ` <span class="muted">· ${list.length - 1} other match${list.length > 2 ? 'es' : ''}</span>` : ''}`
+          : 'Not found in the journal lists. You can still submit; the journal will be used as typed.';
+      } catch (x) { out.innerHTML = ''; }
+    };
+    inp.addEventListener('input', () => { clearTimeout(tjTimer); tjTimer = setTimeout(show, 400); });
+    if (pick) show();
+    btn.addEventListener('click', () => {
+      const title = String((form.paper_title && form.paper_title.value) || '').trim();
+      if (title.length < 8) { err.textContent = 'Enter the paper title first, then find journals for it.'; if (form.paper_title) form.paper_title.focus(); return; }
+      store.set('jfPrefill', { title, abstract: '', keywords: '', field: String((form.field && form.field.value) || ''), target_journal: inp.value.trim(), max_results: 15 });
+      location.hash = '#/journals';
+    });
+  }
 
   // ---------- CHANGES SINCE PREVIOUS VERSION ----------
   const CHANGE_LABEL = { resolved: ['Resolved', 'ok'], improved: ['Improved', 'ok'], persisting: ['Still open', 'warn'], worsened: ['Worse', 'bad'], new: ['New', 'bad'], not_rechecked: ['Not re-checked', ''] };
@@ -1335,19 +1371,39 @@
     return h;
   }
 
+  // Step-by-step revision plan. Built from revision_roadmap; optional fields
+  // location / fix / verify are shown when the engine provides them.
   function viewRoadmap(S, id) {
     const RM = S.revision_roadmap || {};
     const groups = [['priority_1_must_fix', 'Priority 1 — Must fix', 'CRITICAL'], ['priority_2_substantive', 'Priority 2 — Substantive revision', 'MAJOR'], ['priority_3_strengthening', 'Priority 3 — Strengthening', 'MINOR'], ['priority_4_editorial', 'Priority 4 — Editorial', 'INFO']];
     const done = store.get('road:' + id, {});
-    return `<div class="card"><p class="muted" style="margin-top:0">Tick items off as you revise — progress is saved in this browser.</p>
-      ${groups.map(([k, label, sev]) => `<div class="roadmap-group"><h3><span class="sev sev-${sev}">${sev === 'INFO' ? 'P4' : sev === 'MINOR' ? 'P3' : sev === 'MAJOR' ? 'P2' : 'P1'}</span> ${label}</h3>
-        ${arr(RM[k]).length ? arr(RM[k]).map((t, i) => { const key = k + ':' + i; return `<label class="task ${done[key] ? 'done' : ''}"><input type="checkbox" data-road="${key}" ${done[key] ? 'checked' : ''}><span>${esc(t.action)}${arr(t.finding_ids).filter(Boolean).length ? ` <small>[${arr(t.finding_ids).filter(Boolean).map(esc).join(', ')}]</small>` : ''}</span></label>`; }).join('') : '<p class="muted">Nothing in this group.</p>'}</div>`).join('')}
-      ${arr(S.cover_letter_tips).length ? `<h3>Cover-letter tips</h3><ul class="clean">${arr(S.cover_letter_tips).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>`;
+    let total = 0, ticked = 0;
+    groups.forEach(([k]) => arr(RM[k]).forEach((t, i) => { total++; if (done[k + ':' + i]) ticked++; }));
+    let n = 0;
+    const meta = (label, v) => v ? `<p class="muted" style="margin:2px 0 0 28px;font-size:13.5px"><b>${label}:</b> ${esc(v)}</p>` : '';
+    const body = groups.map(([k, label, sev]) => {
+      const items = arr(RM[k]);
+      if (!items.length) return '';
+      const start = n + 1;
+      return `<h3 style="margin-top:18px"><span class="sev sev-${sev}">${sev === 'INFO' ? 'P4' : sev === 'MINOR' ? 'P3' : sev === 'MAJOR' ? 'P2' : 'P1'}</span> ${label}</h3>
+        <ol class="clean" start="${start}" style="padding-left:0;list-style:none;margin:0">${items.map((t, i) => {
+          n++; const key = k + ':' + i; const fids = arr(t.finding_ids).filter(Boolean);
+          return `<li class="step" style="margin:0 0 12px">
+            <label class="task ${done[key] ? 'done' : ''}" style="margin:0"><input type="checkbox" data-road="${key}" ${done[key] ? 'checked' : ''}><span><b>Step ${n}.</b> ${esc(t.action)}${fids.length ? ` <small>[${fids.map(esc).join(', ')}]</small>` : ''}</span></label>
+            ${meta('Where', t.location)}${meta('How', t.fix)}${meta('Check', t.verify)}
+          </li>`; }).join('')}</ol>`;
+    }).join('');
+    return `<div class="card"><p class="muted" style="margin-top:0">Work through the steps in order. Each step names the finding it resolves. When you are done, submit the revised paper as a new version: its <i>Changes since last version</i> tab shows which findings were resolved. Progress is saved in this browser.</p>
+      <p style="margin:0 0 6px"><b id="stepCount">${ticked} of ${total} steps done</b></p>
+      ${total ? body : '<p class="muted">The engine produced no revision steps for this review.</p>'}
+      ${arr(S.cover_letter_tips).length ? `<h3 style="margin-top:18px">Cover-letter tips</h3><ul class="clean">${arr(S.cover_letter_tips).map(x => `<li>${esc(x)}</li>`).join('')}</ul>` : ''}</div>`;
   }
   function wireRoadmap(id) {
     $$('[data-road]').forEach(cb => cb.addEventListener('change', () => {
       const done = store.get('road:' + id, {}); done[cb.dataset.road] = cb.checked; store.set('road:' + id, done);
       cb.closest('.task').classList.toggle('done', cb.checked);
+      const all = $$('[data-road]'); const sc = $('#stepCount');
+      if (sc) sc.textContent = all.filter(x => x.checked).length + ' of ' + all.length + ' steps done';
     }));
     const rd = $('#refData'); if (!rd) return;
     const results = JSON.parse(rd.textContent.replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));

@@ -5,6 +5,7 @@ window.Q1_CONFIG = {
   submitPath: '/q1-review-submit',
   statusPath: '/q1-review-status',
   journalFinderPath: '/q1-journal-finder',
+  journalLookupPath: '/q1-journal-lookup',
   pollSeconds: 12,
   maxFileMB: 15
 };
