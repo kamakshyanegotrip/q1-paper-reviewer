@@ -84,7 +84,7 @@ test('venue tier applies only to peer-reviewed, and only when set', () => {
   const recs = [
     { doi: '10.1/q1', title: 'Q1', year: 2022, type: 'article', tier: { scopus: 'active', sjrQuartile: 'Q1' } },
     { doi: '10.1/q4', title: 'Q4', year: 2022, type: 'article', tier: { scopus: 'active', sjrQuartile: 'Q4' } },
-    { title: 'Govt report', year: 2023, isGrey: true, organisation: 'Ministry of Tourism' }
+    { title: 'Govt report', year: 2023, isGrey: true, organisation: 'Ministry of Tourism', method: 'desk review' }
   ];
   const { kept } = filterSources(recs, { minTier: { sjrQuartile: 'Q2' } });
   assert.deepEqual(kept.map(k => k.title).sort(), ['Govt report', 'Q1']);

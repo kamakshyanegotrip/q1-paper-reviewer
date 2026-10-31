@@ -44,7 +44,7 @@ test('pipeline: default style is APA 7, references sorted, log present', async (
     { doi: '10.1/a', title: 'Medical visas', year: 2021, authors: [{ family: 'Lee', given: 'A' }], venue: 'J', citations: 10, tier: { scopus: 'active', sjrQuartile: 'Q1' }, abstract: 'x', type: 'article' },
     { doi: '10.1/a', title: 'Medical visas', year: 2021, authors: [{ family: 'Lee', given: 'A' }], venue: 'J', citations: 10, type: 'article' },
     { doi: '10.1/r', title: 'Retracted', year: 2020, retracted: true, type: 'article', authors: [] },
-    { isGrey: true, organisation: 'UN Tourism', title: 'Report', year: 2023, publisher: 'UN Tourism', url: 'https://u' }
+    { isGrey: true, organisation: 'UN Tourism', title: 'Report', year: 2023, publisher: 'UN Tourism', url: 'https://u', method: 'desk review' }
   ];
   const llm = async () => 'Visas matter {{cite:10.1/a}}. Reports add context {{cite:ty:Report}}.';
   const out = await runLiteratureReview({ question: 'Q?', records, llm });
