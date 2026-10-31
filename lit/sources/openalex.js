@@ -1,6 +1,7 @@
 // OpenAlex adapter: search works and normalise to the source record used by the engine.
 // The HTTP call is injected (fetchJson) so tests can run without network access.
 'use strict';
+const { trustedPublisher } = require('./grey');
 
 const BASE = 'https://api.openalex.org/works';
 
@@ -31,11 +32,13 @@ function normalizeWork(w) {
       return { family: parts.slice(-1)[0] || '', given: parts.slice(0, -1).join(' ') };
     }),
     venue: src.display_name || '',
-    type: w.type === 'review' ? 'review' : (w.type === 'proceedings-article' ? 'conference' : 'article'),
+    type: w.type === 'report' ? 'grey' : (w.type === 'review' ? 'review' : (w.type === 'proceedings-article' ? 'conference' : 'article')),
     citations: w.cited_by_count || 0,
     retracted: !!w.is_retracted,
     abstract: rebuildAbstract(w.abstract_inverted_index),
-    isGrey: false,
+    isGrey: w.type === 'report',                       // reports go through the grey-source gate
+    organisation: (w.authorships || []).map(a => a.institutions && a.institutions[0] && a.institutions[0].display_name).find(Boolean) || src.display_name || '',
+    trustedPublisher: w.type === 'report' && trustedPublisher(((w.authorships || []).map(a => a.institutions && a.institutions[0] && a.institutions[0].display_name).find(Boolean)) || src.display_name || ''),
     source: 'openalex'
   };
 }
