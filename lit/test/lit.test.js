@@ -34,7 +34,7 @@ test('Harvard and Vancouver formats', () => {
 });
 
 test('unknown style is rejected, not silently changed', () => {
-  assert.throws(() => resolveStyle('chicago'), /Unknown citation style/);
+  assert.throws(() => resolveStyle('bluebook'), /Unknown citation style/);
 });
 
 test('grey literature cites the organisation as author', () => {
