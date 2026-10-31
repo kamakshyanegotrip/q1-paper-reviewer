@@ -50,7 +50,7 @@ function filterSources(records, userFilters) {
     }
     if (f.dropRetracted && s.retracted) { excl(s, 'retracted'); continue; }
     if (!f.types.includes(type)) { excl(s, 'type:' + type); continue; }
-    if (s.isGrey && !String(s.method || '').trim()) { excl(s, 'grey-no-method'); continue; }   // grey sources must state their method
+    if (s.isGrey && !String(s.method || '').trim() && !s.trustedPublisher) { excl(s, 'grey-no-method'); continue; }   // grey sources must state a method, or come from an allowlisted government/industry publisher
     if (f.yearFrom && s.year && s.year < f.yearFrom) {
       if (!(f.foundationalExempt && isFoundational)) { excl(s, 'before-year-range'); continue; }
     }
