@@ -7,13 +7,13 @@ const { formatReference, resolveStyle } = require('./format');
 const { synthesize, sourceKey, buildPrompt } = require('./synthesis');
 const { validateCitations } = require('./validate');
 
-async function runLiteratureReview({ question, records, filters, style, llm, maxAttempts }) {
+async function runLiteratureReview({ question, records, filters, style, llm, maxAttempts, length, outline }) {
   const chosenStyle = resolveStyle(style);                       // default APA 7
   const { kept, excluded, log } = filterSources(records, filters);
   if (kept.length === 0) {
     return { ok: false, reason: 'No sources passed the filters', log, excluded };
   }
-  const syn = await synthesize(question, kept, llm, { maxAttempts });
+  const syn = await synthesize(question, kept, llm, { maxAttempts, length, outline });
   const references = kept
     .slice()
     .sort((a, b) => String(a.authors && a.authors[0] ? a.authors[0].family : a.organisation || a.title).localeCompare(String(b.authors && b.authors[0] ? b.authors[0].family : b.organisation || b.title)))
@@ -42,13 +42,13 @@ async function runLiteratureReview({ question, records, filters, style, llm, max
 
 // Two-step version for n8n: step 1 searches/filters and builds the prompt; the model call is a
 // separate node (it needs a stored credential); step 2 checks the reply and formats the result.
-function prepareLiterature({ question, records, filters, style }) {
+function prepareLiterature({ question, records, filters, style, length, outline }) {
   const chosenStyle = resolveStyle(style);
   const { kept, excluded, log } = filterSources(records, filters);
   if (kept.length === 0) {
     return { early: { ok: false, reason: 'No sources passed the filters', log, excluded } };
   }
-  return { early: null, prompt: buildPrompt(question, kept), kept, style: chosenStyle, log, excluded };
+  return { early: null, prompt: buildPrompt(question, kept, { length, outline }), kept, style: chosenStyle, log, excluded };
 }
 
 function finishLiterature({ prep, text, error }) {

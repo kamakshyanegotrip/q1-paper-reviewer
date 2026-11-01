@@ -1483,6 +1483,9 @@
       <form id="litForm" style="margin-top:16px">
         <label class="field"><span>Research question</span><textarea name="question" rows="2">${esc(litBrief.question)}</textarea></label>
         <label class="field"><span>Search queries (one per line)</span><textarea name="queries" rows="5">${esc(litBrief.queries.join('\n'))}</textarea></label>
+        <label class="field"><span>Expected length (optional)</span><input type="text" name="length" placeholder="1,200 to 1,800 words" maxlength="60"></label>
+        <label class="field"><span>Headings or points to cover (optional, one per line)</span><textarea name="outline" rows="5" placeholder="Clinical readiness&#10;Regulatory governance&#10;Economic dynamics"></textarea></label>
+        <p class="muted" style="font-size:13.5px;margin-top:-4px">If you list headings, the draft follows them in this order, one section each, and ends with a gaps section. Leave them empty for a draft organised by theme.</p>
         <div class="grid-2">
           <label class="field"><span>Citation style</span><select name="style">${LIT_STYLES.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
           <label class="field"><span>Published from (year, optional)</span><input type="number" name="yearFrom" min="1900" max="2100" placeholder="No limit"></label>
@@ -1525,6 +1528,7 @@
     try {
       const d = await apiPostForm(CFG.literaturePath || '/q1-literature-run', {
         review_id: id, question: f.question.value.trim(), queries: JSON.stringify(queries), style: f.style.value,
+        length: f.length.value.trim(), outline: JSON.stringify(f.outline.value.split('\n').map(x => x.trim()).filter(Boolean)),
         filters: JSON.stringify({ yearFrom: f.yearFrom.value ? Number(f.yearFrom.value) : null, minCitations: f.minCitations.value ? Number(f.minCitations.value) : null, includeGrey: f.includeGrey.checked }),
         gaps: JSON.stringify((litBrief && litBrief.gaps) || [])
       });

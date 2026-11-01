@@ -60,6 +60,14 @@ if (auth.authorized !== true)
 if (!question || !queries.length)
   return [{ json: { early: { ok: false, reason: 'A research question and at least one search query are required' } } }];
 
+// Optional user settings from the form: expected length text and a list of headings or points.
+function cleanLength(v) { return String(v || '').replace(/[^0-9A-Za-z ,.\u2013-]/g, '').trim().slice(0, 60); }
+function cleanOutline(v) {
+  let list = [];
+  try { list = JSON.parse(v || '[]'); } catch (e) { list = []; }
+  return (Array.isArray(list) ? list : []).map(x => String(x).trim().slice(0, 120)).filter(Boolean).slice(0, 12);
+}
+
 const includeGrey = f.includeGrey !== false;
 const yearFrom = f.yearFrom || null;
 // n8n Code nodes expose the HTTP helper as this.helpers (not $helpers) and may lack URLSearchParams.
@@ -78,6 +86,7 @@ for (const q of queries.slice(0, 8)) {
 const types = includeGrey ? ['article', 'review', 'conference', 'grey'] : ['article', 'review', 'conference'];
 const prep = prepareLiterature({
   question, records, style: b.style || '',
+  length: cleanLength(b.length), outline: cleanOutline(b.outline),
   filters: { types, yearFrom, minCitations: f.minCitations == null ? null : f.minCitations, dropRetracted: true, dedupe: true }
 });
 if (auth.authorized !== true) prep.early = { ok: false, reason: 'Not authorised' };
@@ -95,9 +104,9 @@ function workflow() {
       { parameters: { jsCode: code },
         id: 'lit-engine', name: 'Literature engine', type: 'n8n-nodes-base.code', typeVersion: 2, position: [260, 200] },
       // Gemini free tier. Uses the existing Google Gemini (PaLM) API credential, chosen in the node.
-      // Model: gemini-2.0-flash-lite (on the Gemini API free tier).
+      // Model: gemini-3.5-flash-lite (on the Gemini API free tier).
       { parameters: {
-          method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
+          method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
           authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
           sendBody: true, specifyBody: 'json',
           jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 8000, temperature: 0.2 } } }}",
