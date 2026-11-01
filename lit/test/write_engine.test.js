@@ -135,3 +135,22 @@ test('a paragraph request without its outline point is refused', async () => {
   assert.equal(r.out.ok, false);
   assert.match(r.out.reason, /outline point/);
 });
+
+test('a transform uses the article and the picked works, and cites them', async () => {
+  const work = { doi: 'https://doi.org/10.1/newvisa', title: 'New visa evidence', publication_year: 2024, type: 'article',
+    authorships: [{ author: { display_name: 'Ana Lee' } }], primary_location: { source: { display_name: 'Health J' } }, cited_by_count: 5, abstract_inverted_index: { Visa: [0] } };
+  const calls = [];
+  const r = await runWriter({ key: 'q1k-test', type: 'book:authored', section: 'chapter_1', words: 400, style: 'apa7', action: 'transform',
+    source: 'Visa rules shape demand in medical tourism.', project: JSON.stringify({ title: 'Visa book' }), prior: '[]', works: JSON.stringify([work]) },
+    { calls, gemini: 'Visa rules shape demand {{cite:10.1/newvisa}}.' });
+  assert.equal(r.out.ok, true, JSON.stringify(r.out).slice(0, 300));
+  assert.match(r.engine.prompt, /Source article:\nVisa rules shape demand/);
+  assert.match(r.engine.prompt, /key: 10\.1\/newvisa/);
+  assert.ok(!calls.some(c => c.includes('api.openalex.org')), 'no repeat search');
+});
+
+test('a transform without an article is refused', async () => {
+  const r = await runWriter({ key: 'q1k-test', type: 'book:authored', section: 'chapter_1', words: 400, action: 'transform', source: '', works: '[]' });
+  assert.equal(r.out.ok, false);
+  assert.match(r.out.reason, /article/);
+});

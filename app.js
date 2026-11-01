@@ -660,6 +660,151 @@
     }));
   }
 
+
+  // ---------- Transform: rewrite an article into another format, with chosen new literature ----------
+  const TR_KEY = 'tr:draft';
+  const TR_SELECT = 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted';
+  const workLine = w => { const au = (w.authorships || [])[0]; const who = au && au.author ? au.author.display_name : 'Unknown author'; return `${w.title || 'Untitled'} (${who}, ${w.publication_year || 'n.d.'})`; };
+
+  function renderTransform() {
+    const W2 = window.Q1Write, PL2 = window.Q1Plan;
+    const job = store.get(TR_KEY, {}) || {};
+    const type = W2.REPORT_TYPES[job.type] ? job.type : 'empirical:q1';
+    const picked = Array.isArray(job.picked) ? job.picked : (job.works || []).map((_, i) => i);
+    const typeOptions = Object.keys(W2.REPORT_TYPES).map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(W2.REPORT_TYPES[k].label)}</option>`).join('');
+    const works = job.works || [];
+    const worksHtml = works.length
+      ? works.map((w, i) => `<label style="display:block;font-size:14px;margin:4px 0"><input type="checkbox" data-pick="${i}"${picked.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`).join('')
+      : '<p class="muted" style="font-size:14px">No literature searched yet. Enter a topic above and search.</p>';
+    const outline = PL2.buildOutline(type, job.words || 6000, job.budgets || {});
+    const secs = W2.REPORT_TYPES[type].sections.filter(s => s.id !== 'references');
+    const done = job.sections || {};
+    const sectionHtml = secs.map(s => {
+      const text = (done[s.id] || {}).text || '';
+      return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
+        ${text ? `<textarea rows="8" data-tr-edit="${esc(s.id)}" style="width:100%">${esc(text)}</textarea>` : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}</article>`;
+    }).join('');
+    const hasOutput = secs.some(s => (done[s.id] || {}).text);
+
+    app.innerHTML = `
+      <section class="card" style="margin-top:8px">
+        <div class="card-head"><h2 style="margin:0">Transform an article</h2><small>Turn an article into another format, and update it with new literature</small></div>
+        <p class="muted" style="font-size:14px;margin:4px 0 12px">Paste the article text or choose a .txt file. Word and PDF upload is not connected yet, so paste the text from those files for now.</p>
+        <label class="field"><span>Article text</span><textarea id="trSource" rows="8" placeholder="Paste the article here">${esc(job.source || '')}</textarea></label>
+        <input type="file" id="trFile" accept=".txt,text/plain" style="margin:6px 0 12px">
+        <div class="grid two">
+          <label class="field"><span>Transform into</span><select id="trType">${typeOptions}</select></label>
+          <label class="field"><span>Total length (words)</span><input type="number" id="trWords" min="300" max="60000" step="100" value="${esc(job.words || 6000)}"></label>
+        </div>
+      </section>
+      <section class="card" style="margin-top:16px">
+        <div class="card-head"><h2 style="margin:0">New literature</h2><small>Search, then tick the works to use</small></div>
+        <div class="grid two">
+          <label class="field"><span>Topic to search</span><input type="text" id="trQuery" value="${esc(job.query || '')}" placeholder="e.g. medical visa policy and patient mobility"></label>
+          <label class="field"><span>Published from <i>year, optional</i></span><input type="number" id="trYear" min="1950" max="2026" value="${esc(job.yearFrom || '')}"></label>
+        </div>
+        <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
+        <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
+      </section>
+      <section class="card" style="margin-top:16px">
+        <div class="card-head"><h2 style="margin:0">Transform</h2><small>one section at a time, in the target format's order</small></div>
+        <button class="btn btn-primary" type="button" id="trGo">Transform now</button>
+        <div id="trStatus" class="muted" style="font-size:14px;margin:8px 0" aria-live="polite"></div>
+        <div style="margin-top:10px">${sectionHtml}</div>
+        ${hasOutput ? '<button class="btn" type="button" id="trDown">Download as Word document</button>' : ''}
+      </section>`;
+
+    const setStatus = t => { const el = $('#trStatus'); if (el) el.textContent = t; };
+    const saveJob = patch => { store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch)); };
+
+    $('#trSource').addEventListener('change', e => saveJob({ source: e.target.value }));
+    $('#trFile').addEventListener('change', async e => {
+      const f = e.target.files && e.target.files[0]; if (!f) return;
+      const text = await f.text(); $('#trSource').value = text; saveJob({ source: text });
+    });
+    $('#trType').addEventListener('change', e => saveJob({ type: e.target.value, sections: {} }));
+    $('#trWords').addEventListener('change', e => saveJob({ words: Math.max(300, Number(e.target.value) || 6000) }));
+    $('#trQuery').addEventListener('change', e => saveJob({ query: e.target.value }));
+    $('#trYear').addEventListener('change', e => saveJob({ yearFrom: e.target.value }));
+
+    // Literature: searched in the browser (OpenAlex is open to browsers); the works you tick are sent with the transform.
+    $('#trSearch').addEventListener('click', async () => {
+      const q = $('#trQuery').value.trim();
+      if (!q) { setStatus('Enter a topic to search.'); return; }
+      const year = $('#trYear').value.trim();
+      const params = new URLSearchParams({ search: q, 'per-page': '25', select: TR_SELECT });
+      if (year) params.set('filter', `from_publication_date:${year}-01-01`);
+      setStatus('Searching new literature…');
+      try {
+        const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
+        const results = (d.results || []).filter(w => !w.is_retracted);
+        saveJob({ query: q, yearFrom: year, works: results, picked: results.map((_, i) => i) });
+        renderTransform();
+        setStatus(`${results.length} works found. Tick the ones to use.`);
+      } catch (e) { setStatus('The literature search could not be reached. Try again.'); }
+    });
+    app.querySelectorAll('input[data-pick]').forEach(c => c.addEventListener('change', () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const i = Number(c.dataset.pick);
+      const set = new Set(Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k));
+      c.checked ? set.add(i) : set.delete(i);
+      saveJob({ picked: [...set].sort((a, b) => a - b) });
+    }));
+
+    // Transform: sections go one at a time so each sees the earlier ones; each is saved as it finishes.
+    $('#trGo').addEventListener('click', async () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      if (!cur.source || !String(cur.source).trim()) { setStatus('Paste or choose the article text first.'); return; }
+      const t = cur.type || 'empirical:q1';
+      const target = Math.max(300, Number(cur.words) || 6000);
+      const outlineNow = PL2.buildOutline(t, target, cur.budgets || {});
+      const chosen = (cur.works || []).filter((_, i) => (Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k)).includes(i));
+      const style = (store.get('wr:project', {}) || {}).style || 'apa7';
+      const sectionsList = W2.REPORT_TYPES[t].sections.filter(s => s.id !== 'references');
+      const out = Object.assign({}, cur.sections || {});
+      const prior = [];
+      for (const s of sectionsList) {
+        setStatus(`Transforming “${s.title}”… this can take up to a minute.`);
+        try {
+          const params = { action: 'transform', type: t, section: s.id, words: outlineNow.sections.find(x => x.id === s.id).words, source: cur.source, works: JSON.stringify(chosen), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior) };
+          const d = await apiPostForm(WRITE_PATH, params);
+          if (!d.ok) throw new Error(d.reason || 'The section could not be transformed.');
+          out[s.id] = { text: d.text || '', references: d.references || [] };
+          saveJob({ sections: out });
+          prior.push({ title: s.title, text: d.text || '' });
+        } catch (e) {
+          setStatus(`Stopped at “${s.title}”: ${e.message}`);
+          renderTransform();
+          return;
+        }
+      }
+      setStatus('Transform finished. Check each section, then download.');
+      renderTransform();
+    });
+
+    app.querySelectorAll('textarea[data-tr-edit]').forEach(t => t.addEventListener('change', () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const sections = Object.assign({}, cur.sections || {});
+      sections[t.dataset.trEdit] = Object.assign({}, sections[t.dataset.trEdit] || {}, { text: t.value });
+      saveJob({ sections });
+    }));
+
+    const dl = $('#trDown');
+    if (dl) dl.addEventListener('click', () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const title = (W2.REPORT_TYPES[cur.type || 'empirical:q1'] || { label: 'Document' }).label;
+      const refs = [];
+      const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
+        (cur.sections[s.id].references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
+        return `<h2>${esc(s.title)}</h2>${paraList(cur.sections[s.id].text).map(p => `<p>${esc(p)}</p>`).join('')}`;
+      }).join('');
+      const refsHtml = refs.length ? `<h2>References</h2><ol>${refs.map(r => `<li>${esc(r)}</li>`).join('')}</ol>` : '';
+      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title></head><body><h1>${esc(title)}</h1>${body}${refsHtml}</body></html>`;
+      download('transformed-' + (cur.type || 'document').replace(/[^a-z0-9]+/gi, '-') + '.doc', html, 'application/msword');
+    });
+  }
+
   // ---------- router ----------
   function route() {
     stopPolling();
@@ -674,6 +819,7 @@
     if (parts[0] === 'how') return renderHow();
     if (parts[0] === 'journals') return renderJournals();
     if (parts[0] === 'write') return renderWriting();
+    if (parts[0] === 'transform') return renderTransform();
     if (parts[0] === 'dashboard') return renderDashboard();
     if (parts[0] === 'admin') return renderAdmin();
     renderHome();

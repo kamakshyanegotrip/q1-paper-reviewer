@@ -126,3 +126,11 @@ test('a paragraph prompt covers one point and follows the earlier paragraphs', (
   assert.match(p, /First paragraph text/);
   assert.match(p, /about 200 words/);
 });
+
+test('a transform prompt gives the source, the target structure and the sources to use', () => {
+  const p = P.buildTransformPrompt({ type: 'book:authored', section: 'chapter_1', words: 800, source: 'Visa rules shape demand.', prior: [], sourcesText: '- key: 10.1/x | Lee (2024)', project: { title: 'Visa book' } });
+  assert.match(p, /Source article:\nVisa rules shape demand/);
+  assert.match(p, /Target document structure/);
+  assert.match(p, /\{\{cite:KEY\}\}/);
+  assert.match(p, /about 800 words/);
+});
