@@ -118,3 +118,20 @@ test('the section hint is used in the section prompt', async () => {
   assert.equal(r.out.ok, true);
   assert.match(r.engine.prompt, /Bone marrow disease causes/);
 });
+
+test('a paragraph covers one outline point, follows the paragraphs before it, and searches', async () => {
+  const calls = [];
+  const r = await runWriter({ ...base, action: 'paragraph', point: 'Visa rules and demand', words: 200, position: 2, total: 3, priorParagraphs: 'First paragraph text.' },
+    { calls, gemini: 'Visa rules shape demand {{cite:' + 'x' + '}}.' });
+  assert.equal(r.out.ok, true, JSON.stringify(r.out).slice(0, 300));
+  assert.match(r.engine.prompt, /paragraph 2 of 3/);
+  assert.match(r.engine.prompt, /First paragraph text/);
+  assert.match(r.engine.prompt, /about 200 words/);
+  assert.ok(calls.some(c => c.includes('api.openalex.org')));
+});
+
+test('a paragraph request without its outline point is refused', async () => {
+  const r = await runWriter({ ...base, action: 'paragraph', point: '' });
+  assert.equal(r.out.ok, false);
+  assert.match(r.out.reason, /outline point/);
+});

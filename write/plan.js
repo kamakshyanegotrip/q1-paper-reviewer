@@ -142,7 +142,50 @@
     return lines.join('\n');
   }
 
-  const api = { buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
+
+  // Words for each paragraph of a section: the section budget split evenly, rounded to 10.
+  function paragraphBudgets(words, count) {
+    const n = Math.max(1, Math.round(Number(count) || 0));
+    const each = Math.max(10, Math.round((Number(words) || 0) / n / 10) * 10);
+    return Array.from({ length: n }, () => each);
+  }
+
+  // The outline of a section: one paragraph per content point, with its word count.
+  function outlineOf(points, words) {
+    const items = String(points || '').split('\n').map(x => x.trim()).filter(Boolean);
+    const budgets = paragraphBudgets(words, items.length);
+    return items.map((point, i) => ({ index: i, point, words: budgets[i] }));
+  }
+
+  // The prompt for one paragraph of a section, covering one outline point. prior is the paragraphs before it.
+  function buildParagraphPrompt({ type, section, point, words, prior = [], hint = '', sourcesText = '', style = '', project = {}, position = 1, total = 1 }) {
+    const t = T.REPORT_TYPES[type] || { label: 'document' };
+    const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '', needs: [] };
+    const lines = [
+      `You are writing paragraph ${position} of ${total} in the "${s.title}" section of an academic ${t.label.toLowerCase()}.`,
+      `Section purpose: ${s.brief}`,
+      `Research question: ${project.question || '(not given)'}`,
+      `Topic and context: ${project.topic || '(not given)'}`,
+      `This paragraph covers only this point: ${point}`,
+      'Rules:',
+      '- Write one paragraph only. Do not add a heading, a list or commentary.',
+      '- Cover only this point. Do not repeat what the earlier paragraphs say.',
+      '- Use ONLY the sources listed below, and only the results and notes given here. Do not invent facts or figures.',
+      '- If a detail needed for this point is missing, write [INSERT: what is missing] at that point.',
+      sourcesText ? '- Cite every factual claim with {{cite:KEY}} using the exact key shown.' : '- Make no citations; no sources were provided.',
+      '- Write in formal academic English.',
+      `- Length: about ${words} words (no more than 10% above or below).`
+    ];
+    if (String(hint || '').trim()) lines.push(`Author's framing hint: ${String(hint).trim()}`);
+    if (s.needs.includes('results') && project.results) lines.push(`Results provided (use only these):\n${project.results}`);
+    if (s.needs.includes('notes') && project.notes) lines.push(`Data, method and notes provided:\n${project.notes}`);
+    if (prior.length) lines.push('Paragraphs already written in this section (follow on from them, do not repeat them):\n' + prior.map(x => clip(x, 1500)).join('\n\n'));
+    if (sourcesText) lines.push(`Sources:\n${sourcesText}`);
+    if (style) lines.push(`Citation style: ${style}`);
+    return lines.join('\n');
+  }
+
+  const api = { buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);

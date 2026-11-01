@@ -322,13 +322,24 @@
       <button class="btn btn-sm" type="button" data-discuss-toggle="${esc(sid)}:${idx}">Modify by AI discussion</button>
       <button class="btn btn-sm" type="button" data-revise="cite" data-sec-id="${esc(sid)}" data-idx="${idx}">Add content and literature</button>`;
   const discussBox = (sid, idx) => `<div data-discuss-box="${esc(sid)}:${idx}" hidden style="margin-top:6px"><textarea rows="2" data-instr="${esc(sid)}:${idx}" placeholder="What should change? e.g. argue that the cost barrier is overstated" style="width:100%"></textarea><button class="btn btn-sm" type="button" data-revise="discuss" data-sec-id="${esc(sid)}" data-idx="${idx}" style="margin-top:4px">Run the change</button></div>`;
+  // The outline of a section: one paragraph per content point, with its planned words.
+  function outlineHtml(sid, points, words) {
+    const items = PL.outlineOf(points, words);
+    if (!items.length) return '';
+    return `<div style="font-size:14px;margin:6px 0 8px"><b>Outline</b> <i class="muted">(one paragraph per point)</i><ol style="margin:4px 0 0 18px">${items.map(o => `<li>${esc(o.point)} <span class="muted">· ${o.words} words</span></li>`).join('')}</ol></div>`;
+  }
+  // A "+" between paragraphs: insert a paragraph typed by hand, or written by AI from a point.
+  const insertBar = (sid, j) => `<div style="margin:4px 0"><button class="btn btn-ghost btn-sm" type="button" title="Insert a paragraph here" data-insert-toggle="${esc(sid)}:${j}">+</button>
+      <div data-insert-box="${esc(sid)}:${j}" hidden style="margin-top:6px"><textarea rows="2" data-insert-text="${esc(sid)}:${j}" placeholder="The point for the new paragraph, or the paragraph itself" style="width:100%"></textarea>
+      <div style="display:flex;gap:6px;margin-top:4px"><button class="btn btn-sm" type="button" data-insert-ai="${esc(sid)}:${j}">Write with AI from this point</button><button class="btn btn-sm" type="button" data-insert-own="${esc(sid)}:${j}">Insert as typed</button></div></div></div>`;
   function renderParas(sid, text) {
-    return paraList(text).map((p, j) => `
+    const paras = paraList(text);
+    return insertBar(sid, 0) + paras.map((p, j) => `
       <div class="para" style="border-left:3px solid #d9d2c3;padding-left:10px;margin:10px 0">
         <textarea rows="4" data-para="${esc(sid)}" data-idx="${j}" style="width:100%">${esc(p)}</textarea>
         <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${modSelect()} ${actionButtons(sid, j, j === 0)}</div>
         ${discussBox(sid, j)}
-      </div>`).join('');
+      </div>${insertBar(sid, j + 1)}`).join('');
   }
   // Same actions on the whole section, for changes that span paragraphs.
   function sectionTools(sid) {
@@ -417,6 +428,7 @@
               <label class="field"><span>Hint <i>a topic or angle; the literature and the text are framed around it, e.g. “causes of bone marrow disease”</i></span><textarea rows="2" data-hint="${esc(s.id)}">${esc((proj.hints || {})[s.id] || '')}</textarea></label>
             </div>
             <label class="field"><span>Content points for this section <i>one per line</i></span><textarea rows="3" data-points="${esc(s.id)}">${esc((proj.points || {})[s.id] || '')}</textarea></label>
+            ${outlineHtml(s.id, (proj.points || {})[s.id] || '', words(s.id))}
             <button class="btn btn-sm" type="button" data-write="${esc(s.id)}" ${st.state === 'ready' || st.state === 'drafted' ? '' : 'disabled'}>${d.text ? 'Write again' : 'Write this section'}</button>
             ${counted ? `<span class="muted" style="font-size:13px;margin-left:8px">${counted.count} of ${counted.words} words ${counted.ok ? '' : '(outside 10%)'}</span>` : ''}
             <div data-out="${esc(s.id)}">${d.text ? renderParas(s.id, d.text) : ''}</div>
@@ -483,17 +495,23 @@
       const idx = sections.findIndex(s => s.id === id);
       const prior = sections.slice(0, idx).filter(s => d0[s.id] && d0[s.id].text).map(s => ({ title: s.title, text: d0[s.id].text }));
       const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
-      const bodyParams = { type, section: id, words: planned, points: (cur.points || {})[id] || '', hint: (cur.hints || {})[id] || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior) };
-      setStatus(`Writing “${title}” (about ${planned} words)… this can take up to a minute.`);
+      const items = PL.outlineOf((cur.points || {})[id] || '', planned);
       if (btn) btn.disabled = true;
       try {
-        const d = await apiPostForm(WRITE_PATH, bodyParams);
-        if (!d.ok) throw new Error(d.reason || 'The section could not be written.');
-        const all = store.get('wr:drafts', {}) || {};
-        all[id] = { text: d.text || '', labels: d.labels || {}, references: d.references || [], words: planned, at: new Date().toISOString() };
-        store.set('wr:drafts', all);
-        const check = PL.lengthCheck(d.text || '', planned);
-        setStatus(`“${title}” written: ${check.count} words against ${planned} planned${check.ok ? '.' : ' (outside 10%: edit it or change the budget).'}${d.warning ? ' Check: ' + d.warning : ''}`);
+        const paras = [], labels = {}, refs = [];
+        for (let i = 0; i < items.length; i++) {
+          setStatus(`Writing “${title}”: paragraph ${i + 1} of ${items.length} (${items[i].words} words)… this can take up to a minute each.`);
+          const body = { action: 'paragraph', type, section: id, point: items[i].point, words: items[i].words, position: i + 1, total: items.length, priorParagraphs: paras.join('\n\n'), hint: (cur.hints || {})[id] || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior) };
+          const d = await apiPostForm(WRITE_PATH, body);
+          if (!d.ok) throw new Error(d.reason || 'A paragraph could not be written.');
+          paras.push((d.text || '').trim());
+          Object.assign(labels, d.labels || {});
+          (d.references || []).forEach(r => { if (!refs.some(o => o.text === r.text)) refs.push(r); });
+          const all = store.get('wr:drafts', {}) || {};
+          all[id] = { text: paras.join('\n\n'), labels, references: refs, words: planned, at: new Date().toISOString() };
+          store.set('wr:drafts', all);
+        }
+        setStatus(`“${title}” written: ${items.length} paragraphs, about ${PL.countWords(paras.join(' '))} words against ${planned} planned. Check each paragraph and use the + between them to add more.`);
         return true;
       } catch (e) {
         setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the section writer is not set up on the server.' : `Could not write “${title}”: ${e.message}`);
@@ -530,6 +548,53 @@
     app.querySelectorAll('textarea[data-hint]').forEach(t => t.addEventListener('change', () => {
       const cur = store.get('wr:project', proj) || proj;
       store.set('wr:project', Object.assign({}, cur, { hints: Object.assign({}, cur.hints || {}, { [t.dataset.hint]: t.value }) }));
+    }));
+
+    // The "+" between paragraphs: type a paragraph, or write one from a point, and insert it there.
+    const insertAt = (sid, j, text) => {
+      const all = store.get('wr:drafts', {}) || {};
+      const paras = paraList((all[sid] || {}).text || '');
+      paras.splice(j, 0, text.trim());
+      all[sid] = Object.assign({}, all[sid] || {}, { text: paras.join('\n\n'), at: new Date().toISOString() });
+      store.set('wr:drafts', all);
+      renderWriting();
+    };
+    app.querySelectorAll('button[data-insert-toggle]').forEach(b => b.addEventListener('click', () => {
+      const box = app.querySelector(`[data-insert-box="${b.dataset.insertToggle}"]`);
+      box.hidden = !box.hidden;
+    }));
+    app.querySelectorAll('button[data-insert-own]').forEach(b => b.addEventListener('click', () => {
+      const [sid, j] = b.dataset.insertOwn.split(':');
+      const text = app.querySelector(`[data-insert-text="${b.dataset.insertOwn}"]`).value;
+      if (!text.trim()) { setStatus('Type the paragraph first.'); return; }
+      insertAt(sid, Number(j), text);
+    }));
+    app.querySelectorAll('button[data-insert-ai]').forEach(b => b.addEventListener('click', async () => {
+      const [sid, j] = b.dataset.insertAi.split(':');
+      const point = app.querySelector(`[data-insert-text="${b.dataset.insertAi}"]`).value.trim();
+      if (!point) { setStatus('Type the point for the new paragraph first.'); return; }
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      const cur = store.get('wr:project', proj) || proj;
+      const all0 = store.get('wr:drafts', {}) || {};
+      const paras = paraList((all0[sid] || {}).text || '');
+      const at = Number(j);
+      const budget = PL.paragraphBudgets(words(sid), paras.length + 1)[0];
+      const title = (sections.find(x => x.id === sid) || { title: sid }).title;
+      const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
+      setStatus(`Writing a new paragraph for “${title}”… this can take up to a minute.`);
+      try {
+        const d = await apiPostForm(WRITE_PATH, { action: 'paragraph', type, section: sid, point, words: budget, position: at + 1, total: paras.length + 1, priorParagraphs: paras.slice(0, at).join('\n\n'), hint: (cur.hints || {})[sid] || '', style: cur.style, project: JSON.stringify(project), prior: '[]' });
+        if (!d.ok) throw new Error(d.reason || 'The paragraph could not be written.');
+        const all = store.get('wr:drafts', {}) || {};
+        const old = all[sid] || {};
+        const refs = (old.references || []).concat((d.references || []).filter(r => !(old.references || []).some(o => o.text === r.text)));
+        all[sid] = Object.assign({}, old, { references: refs, labels: Object.assign({}, old.labels || {}, d.labels || {}) });
+        store.set('wr:drafts', all);
+        insertAt(sid, at, d.text || '');
+        setStatus(`New paragraph added to “${title}”.`);
+      } catch (e) {
+        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the section writer is not set up on the server.' : `Could not write the paragraph: ${e.message}`);
+      }
     }));
 
     // Paragraph edits by hand: the draft is rebuilt from its paragraphs.
