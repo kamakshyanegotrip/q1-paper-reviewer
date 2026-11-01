@@ -238,6 +238,7 @@ function buildPrompt(question, kept, opts = {}) {
     '- If the sources do not cover a point, say so under a heading "Gaps in the evidence" instead of guessing.',
     '- Do not invent statistics, dates, or policy details.',
     '- Write in formal academic English.',
+    '- Length: about 1,200 to 1,800 words, organised under headings by theme, with a short gaps section at the end.',
     `Sources:\n${list}`
   ].join('\n');
 }
