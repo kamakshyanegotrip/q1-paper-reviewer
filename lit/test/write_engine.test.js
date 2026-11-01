@@ -36,7 +36,7 @@ async function runWriter(body, { auth = authOk, gemini, calls = [] } = {}) {
 }
 
 const base = {
-  key: 'q1k-test', type: 'scientific', section: 'literature_review', words: 870, style: 'apa7',
+  key: 'q1k-test', type: 'empirical:q1', section: 'literature_review', words: 870, style: 'apa7',
   project: JSON.stringify({ topic: 'Medical visas', question: 'What drives medical visa demand?', notes: '', results: '' }),
   prior: JSON.stringify([{ title: 'Introduction', text: 'Earlier text' }]),
   points: 'Visa rules and demand\nPrice sensitivity'

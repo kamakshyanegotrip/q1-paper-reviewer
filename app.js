@@ -314,10 +314,10 @@
   };
 
   function renderWriting() {
-    const base = { type: 'scientific', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '', results: '', target: 6000, budgets: {}, points: {} };
+    const base = { type: 'empirical:q1', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '', results: '', target: 6000, budgets: {}, points: {} };
     const proj = Object.assign({}, base, store.get('wr:project', {}) || {});
     const drafts = store.get('wr:drafts', {}) || {};
-    const type = W.REPORT_TYPES[proj.type] ? proj.type : 'scientific';
+    const type = W.REPORT_TYPES[proj.type] ? proj.type : 'empirical:q1';
     const sections = W.REPORT_TYPES[type].sections;
     const outline = PL.buildOutline(type, proj.target, proj.budgets || {});
     const defaults = PL.buildOutline(type, proj.target, {});
