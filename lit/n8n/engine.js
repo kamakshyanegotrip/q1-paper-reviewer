@@ -268,7 +268,8 @@ __reg["pipeline"] = (function () { const module = { exports: {} }; const exports
 'use strict';
 const { filterSources } = require('./filter');
 const { formatReference, resolveStyle } = require('./format');
-const { synthesize, sourceKey } = require('./synthesis');
+const { synthesize, sourceKey, buildPrompt } = require('./synthesis');
+const { validateCitations } = require('./validate');
 
 async function runLiteratureReview({ question, records, filters, style, llm, maxAttempts }) {
   const chosenStyle = resolveStyle(style);                       // default APA 7
@@ -303,7 +304,41 @@ async function runLiteratureReview({ question, records, filters, style, llm, max
   };
 }
 
-module.exports = { runLiteratureReview };
+// Two-step version for n8n: step 1 searches/filters and builds the prompt; the model call is a
+// separate node (it needs a stored credential); step 2 checks the reply and formats the result.
+function prepareLiterature({ question, records, filters, style }) {
+  const chosenStyle = resolveStyle(style);
+  const { kept, excluded, log } = filterSources(records, filters);
+  if (kept.length === 0) {
+    return { early: { ok: false, reason: 'No sources passed the filters', log, excluded } };
+  }
+  return { early: null, prompt: buildPrompt(question, kept), kept, style: chosenStyle, log, excluded };
+}
+
+function finishLiterature({ prep, text, error }) {
+  if (prep.early) return prep.early;
+  const kept = prep.kept;
+  const references = kept.slice()
+    .sort((a, b) => String(a.authors && a.authors[0] ? a.authors[0].family : a.organisation || a.title).localeCompare(String(b.authors && b.authors[0] ? b.authors[0].family : b.organisation || b.title)))
+    .map(s => ({ key: sourceKey(s), text: formatReference(s, prep.style), tier: s.tierLabel, foundational: !!s.foundational }));
+  const labels = {};
+  for (const s of kept) {
+    const k = sourceKey(s);
+    const who = s.isGrey ? (s.organisation || s.title) : (s.authors && s.authors[0] ? s.authors[0].family : s.title);
+    const more = !s.isGrey && s.authors && s.authors.length > 1 ? ' et al.' : '';
+    labels[k] = `(${who}${more}, ${s.year || 'n.d.'})`;
+  }
+  const base = { labels, style: prep.style, references, log: prep.log, excluded: prep.excluded, skipped: false };
+  if (error || !text) return Object.assign(base, { ok: false, draft: '', reason: 'The AI draft could not be written: ' + (error || 'empty reply') });
+  const check = validateCitations(text, kept.map(sourceKey));
+  return Object.assign(base, {
+    ok: check.ok, draft: text, attempts: 1,
+    unresolvedKeys: check.unknownKeys || [], uncitedSentences: check.uncitedSentences || check.uncited || [],
+    reason: check.ok ? undefined : 'The draft cited sources that are not in the list; check the citations before use.'
+  });
+}
+
+module.exports = { runLiteratureReview, prepareLiterature, finishLiterature };
 
 return module.exports; })();
 __reg["grey"] = (function () { const module = { exports: {} }; const exports = module.exports; const require = __req;
@@ -600,8 +635,7 @@ return module.exports; })();
 
 // ---- runner ----
 const OA = __req('openalex'), EPMC = __req('europepmc'), DOAJ = __req('doaj'), CORE = __req('core'), GREY = __req('grey');
-const { runLiteratureReview } = __req('pipeline');
-const MODEL = 'claude-sonnet-5-5';
+const { prepareLiterature, finishLiterature } = __req('pipeline');
 const MAILTO = ''; // env vars are blocked in Code nodes on this n8n server
 
 // The engine's input is the auth checker's output, so read the form from the webhook node.
@@ -609,12 +643,12 @@ const hook = $("Literature webhook").first().json || {};
 const b = hook.body || hook;
 const question = String(b.question || '').trim();
 let queries = [], f = {};
-try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { ok: false, reason: 'Malformed queries or filters' } }]; }
+try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { early: { ok: false, reason: 'Malformed queries or filters' } } }]; }
 const auth = $("Call 'Q1 Auth - Check Key'").first().json || {};
 if (auth.authorized !== true)
-  return [{ json: { ok: false, reason: 'Not authorised' } }];
+  return [{ json: { early: { ok: false, reason: 'Not authorised' } } }];
 if (!question || !queries.length)
-  return [{ json: { ok: false, reason: 'A research question and at least one search query are required' } }];
+  return [{ json: { early: { ok: false, reason: 'A research question and at least one search query are required' } } }];
 
 const includeGrey = f.includeGrey !== false;
 const yearFrom = f.yearFrom || null;
@@ -631,12 +665,11 @@ for (const q of queries.slice(0, 8)) {
   if (includeGrey) await run('grey', () => GREY.search(q, { yearFrom, perPage: 25, mailto: MAILTO }, fetchJson));
 }
 
-// AI write-up is off until the key can be provided without env vars (see notes).
-const llm = null;
-
 const types = includeGrey ? ['article', 'review', 'conference', 'grey'] : ['article', 'review', 'conference'];
-const result = await runLiteratureReview({
-  question, records, style: b.style || '', llm, maxAttempts: 3,
+const prep = prepareLiterature({
+  question, records, style: b.style || '',
   filters: { types, yearFrom, minCitations: f.minCitations == null ? null : f.minCitations, dropRetracted: true, dedupe: true }
 });
-return [{ json: Object.assign({}, result, { searched: records.length, sourceErrors: errors }) }];
+if (auth.authorized !== true) prep.early = { ok: false, reason: 'Not authorised' };
+return [{ json: Object.assign({}, prep, { searched: records.length, sourceErrors: errors }) }];
+// The next node (Gemini) sends prep.prompt; the finish node reads this output back by name.
