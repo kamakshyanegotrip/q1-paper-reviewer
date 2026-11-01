@@ -304,6 +304,100 @@
     });
   }
 
+  // ---------- Writing from scratch (separate from the review tabs) ----------
+  const W = window.Q1Write;
+  const WRITE_PATH = CFG.writePath || '/q1-write-section';
+  function renderWriting() {
+    const proj = Object.assign({ type: 'scientific', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '' }, store.get('wr:project', {}) || {});
+    const drafts = store.get('wr:drafts', {}) || {};
+    const type = W.REPORT_TYPES[proj.type] ? proj.type : 'scientific';
+    const sections = W.REPORT_TYPES[type].sections;
+    const field = (name, label, value, hint, rows) => `<label class="field"><span>${label}${hint ? ` <i>${hint}</i>` : ''}</span>${rows ? `<textarea name="${name}" rows="${rows}">${esc(value)}</textarea>` : `<input type="text" name="${name}" value="${esc(value)}">`}</label>`;
+    app.innerHTML = `
+      <section class="card">
+        <div class="card-head" style="margin-bottom:6px"><h1 style="margin:0">Writing from scratch</h1><small>separate from review results</small></div>
+        <p class="muted" style="margin-top:0">Write a new paper, proposal or chapter from your own topic. Sources are searched and cited the same way as the literature review. Nothing here comes from a review.</p>
+        ${settings().key ? '' : '<div class="keywarn">Add your access key in <a href="#" id="wrKey">Settings</a> first.</div>'}
+        <form id="wrForm" novalidate>
+          <div class="grid-2">
+            <label class="field"><span>Report type</span><select name="type">${Object.keys(W.REPORT_TYPES).map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(W.REPORT_TYPES[k].label)}</option>`).join('')}</select></label>
+            <label class="field"><span>Citation style</span><select name="style">${[['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']].map(o => `<option value="${o[0]}"${o[0] === proj.style ? ' selected' : ''}>${o[1]}</option>`).join('')}</select></label>
+          </div>
+          ${field('title', 'Working title', proj.title)}
+          ${field('topic', 'Topic and context', proj.topic, 'what the study is about', 3)}
+          ${field('question', 'Research question', proj.question, 'main question', 2)}
+          ${field('aims', 'Aims or objectives', proj.aims, 'optional', 2)}
+          ${field('notes', 'Data, method and other notes', proj.notes, 'optional: sample, design, tools, dates', 3)}
+          <button class="btn btn-primary" type="submit">Save project details</button>
+          <span class="muted" id="wrSaved" style="margin-left:8px;font-size:14px"></span>
+        </form>
+      </section>
+      <section class="card" style="margin-top:16px">
+        <div class="card-head" style="margin-bottom:8px"><h2 style="margin:0">Sections: ${esc(W.REPORT_TYPES[type].label)}</h2><button class="btn btn-ghost btn-sm" id="wrAll" type="button">Write all sections in order</button></div>
+        <p class="muted" style="font-size:14px;margin-top:0">Each section is written after the ones above it, so they stay consistent. You can edit any draft before you go on.</p>
+        <div id="wrStatus" class="muted" style="font-size:14px;margin-bottom:10px" aria-live="polite"></div>
+        ${sections.map((s, i) => `
+          <article class="finding" data-sec="${esc(s.id)}" style="margin-bottom:12px">
+            <div class="finding-top"><span class="id">${i + 1}</span><b>${esc(s.title)}</b>${drafts[s.id] && drafts[s.id].text ? '<span class="tag ok">drafted</span>' : '<span class="tag">not yet</span>'}</div>
+            <p class="muted" style="font-size:14px;margin:4px 0 8px">${esc(s.brief)}</p>
+            <button class="btn btn-sm" type="button" data-write="${esc(s.id)}">${drafts[s.id] && drafts[s.id].text ? 'Write again' : 'Write this section'}</button>
+            <div data-out="${esc(s.id)}">${drafts[s.id] && drafts[s.id].text ? `<textarea rows="8" data-edit="${esc(s.id)}" style="width:100%;margin-top:10px">${esc(drafts[s.id].text)}</textarea>` : ''}</div>
+          </article>`).join('')}
+      </section>`;
+
+    $('#wrForm').addEventListener('submit', e => {
+      e.preventDefault();
+      const f = new FormData(e.target);
+      const next = { type: f.get('type'), style: f.get('style'), title: f.get('title') || '', topic: f.get('topic') || '', question: f.get('question') || '', aims: f.get('aims') || '', notes: f.get('notes') || '' };
+      store.set('wr:project', next);
+      $('#wrSaved').textContent = 'Saved in this browser.';
+      if (next.type !== type) renderWriting();
+    });
+    const wrKey = $('#wrKey'); if (wrKey) wrKey.addEventListener('click', e => { e.preventDefault(); openSettings(); });
+
+    const setStatus = t => { const el = $('#wrStatus'); if (el) el.textContent = t; };
+    const sectionIndex = id => sections.findIndex(s => s.id === id);
+
+    // Writes one section, passing the drafts written before it so the sections stay consistent.
+    const writeOne = async (id, btn) => {
+      const i = sectionIndex(id);
+      const cur = store.get('wr:project', proj) || proj;
+      const prior = sections.slice(0, i).map(s => ({ title: s.title, text: ((store.get('wr:drafts', {}) || {})[s.id] || {}).text || '' })).filter(p => p.text);
+      const body = { type, section: id, brief: W.sectionBrief(type, id), project: JSON.stringify(cur), prior: JSON.stringify(prior) };
+      setStatus(`Writing “${sections[i].title}”… this can take up to a minute.`);
+      if (btn) btn.disabled = true;
+      try {
+        const d = await apiPostForm(WRITE_PATH, body);
+        if (!d.ok) throw new Error(d.reason || 'The section could not be written.');
+        const all = store.get('wr:drafts', {}) || {};
+        all[id] = { text: d.text || '', labels: d.labels || {}, references: d.references || [], at: new Date().toISOString() };
+        store.set('wr:drafts', all);
+        setStatus(`“${sections[i].title}” written.`);
+        return true;
+      } catch (e) {
+        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the section writer is not set up on the server.' : `Could not write “${sections[i].title}”: ${e.message}`);
+        return false;
+      } finally { if (btn) btn.disabled = false; }
+    };
+    app.querySelectorAll('button[data-write]').forEach(b => b.addEventListener('click', async () => {
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      const ok = await writeOne(b.dataset.write, b);
+      if (ok) renderWriting();
+    }));
+    $('#wrAll').addEventListener('click', async e => {
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      e.target.disabled = true;
+      for (const s of sections) { const ok = await writeOne(s.id, null); if (!ok) break; }
+      e.target.disabled = false;
+      renderWriting();
+    });
+    app.querySelectorAll('textarea[data-edit]').forEach(t => t.addEventListener('change', () => {
+      const all = store.get('wr:drafts', {}) || {};
+      all[t.dataset.edit] = Object.assign({}, all[t.dataset.edit] || {}, { text: t.value, at: new Date().toISOString() });
+      store.set('wr:drafts', all);
+    }));
+  }
+
   // ---------- router ----------
   function route() {
     stopPolling();
@@ -317,6 +411,7 @@
     if (parts[0] === 'demo') return renderDemo();
     if (parts[0] === 'how') return renderHow();
     if (parts[0] === 'journals') return renderJournals();
+    if (parts[0] === 'write') return renderWriting();
     if (parts[0] === 'dashboard') return renderDashboard();
     if (parts[0] === 'admin') return renderAdmin();
     renderHome();
