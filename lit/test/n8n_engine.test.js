@@ -33,8 +33,9 @@ function mockHttp(calls) {
 
 async function runNode(body, env, calls, auth = authOk) {
   const fn = new AsyncFunction('$input', '$helpers', '$env', '$', code);
-  const $ = () => ({ first: () => ({ json: auth }) });
-  return fn({ first: () => ({ json: { body } }) }, { httpRequest: mockHttp(calls) }, env, $);
+  // Like n8n: the engine's own input is the auth checker's output; the form is on the webhook node.
+  const $ = name => ({ first: () => ({ json: name === 'Literature webhook' ? { body } : auth }) });
+  return fn({ first: () => ({ json: auth }) }, { httpRequest: mockHttp(calls) }, env, $);
 }
 
 const goodBody = {
