@@ -16,6 +16,47 @@ def sample():
     return df
 
 
+def latent_sample(n=300, seed=11):
+    rng = np.random.default_rng(seed)
+    eta1 = rng.normal(size=n)
+    eta2 = 0.5 * eta1 + rng.normal(scale=np.sqrt(1 - 0.25), size=n)
+    cols = {}
+    for i in range(1, 4):
+        cols[f'a{i}'] = 0.8 * eta1 + rng.normal(scale=0.6, size=n)
+        cols[f'b{i}'] = 0.8 * eta2 + rng.normal(scale=0.6, size=n)
+    return pd.DataFrame(cols)
+
+
+class Sem(unittest.TestCase):
+    spec = {'constructs': [{'name': 'A', 'items': ['a1', 'a2', 'a3']}, {'name': 'B', 'items': ['b1', 'b2', 'b3']}],
+            'paths': [{'from': 'A', 'to': 'B'}], 'bootstrap': 150}
+
+    def test_pls_recovers_loadings_and_path(self):
+        out = A.sem_models(latent_sample(), dict(self.spec, method='PLS'))
+        self.assertTrue(all(l > 0.6 for ls in out['loadings'].values() for l in ls))
+        path = out['paths'][0]
+        self.assertAlmostEqual(path['beta'], 0.5, delta=0.15)
+        self.assertLess(path['p'], 0.05)
+        self.assertGreater(out['r2']['B'], 0.1)
+
+    def test_cfa_fits_the_true_model(self):
+        out = A.sem_models(latent_sample(), dict(self.spec, method='CB', bootstrap=0))
+        self.assertTrue(out['converged'])
+        self.assertGreater(out['fit']['CFI'], 0.9)
+        self.assertLess(out['fit']['RMSEA'], 0.08)
+
+    def test_needs_constructs_and_enough_rows(self):
+        with self.assertRaises(ValueError):
+            A.sem_models(latent_sample(), {'constructs': []})
+        with self.assertRaises(ValueError):
+            A.sem_models(latent_sample(n=20), dict(self.spec, bootstrap=0))
+
+    def test_run_analyses_includes_sem_sentences(self):
+        out = A.run_analyses(latent_sample(), dict(self.spec, method='PLS'))
+        self.assertIn('sem', out)
+        self.assertTrue(any('β =' in s for s in out['sentences']))
+
+
 class Analysis(unittest.TestCase):
     def test_describe_matches_numpy(self):
         df = sample()

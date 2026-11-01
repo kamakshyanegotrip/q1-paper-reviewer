@@ -10,6 +10,8 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from sem import pls, cfa
+
 MAX_ROWS = 200000
 
 
@@ -117,6 +119,70 @@ def _apa_regression(res, y, xs):
     return ' '.join(parts)
 
 
+def sem_models(df, spec, rng_seed=2026):
+    """PLS-SEM path model (method PLS) or CFA fit for the measurement model (method CB).
+    spec: {'method': 'PLS'|'CB', 'constructs': [{'name', 'items'}], 'paths': [{'from', 'to'}], 'bootstrap': 200}
+    """
+    constructs = spec.get('constructs') or []
+    if not constructs:
+        raise ValueError('Name the constructs and their items first')
+    blocks = {c['name']: list(c['items']) for c in constructs}
+    used = sorted({i for v in blocks.values() for i in v})
+    complete = _num(df, used).dropna()
+    if len(complete) < 30:
+        raise ValueError('Fewer than 30 complete cases (%d); SEM not run' % len(complete))
+    Z = (complete - complete.mean()) / complete.std(ddof=0)
+    Z = Z.loc[:, Z.std() > 0]
+    blocks = {k: [i for i in v if i in Z.columns] for k, v in blocks.items()}
+    blocks = {k: v for k, v in blocks.items() if v}
+    names = list(blocks)
+    paths = []
+    for pth in spec.get('paths') or []:
+        a, b = pth.get('from'), pth.get('to')
+        if a in names and b in names and a != b:
+            paths.append((a, b))
+    method = str(spec.get('method') or 'PLS').upper()
+    out = {'n': int(len(complete)), 'method': method, 'constructs': names, 'loadings': {}, 'paths': [], 'r2': {},
+           'fit': None, 'sentences': []}
+    P = pls(Z, blocks, paths)
+    loadings = P['loadings']
+    out['r2'] = P['r2']
+    for (a, b), beta in P['beta'].items():
+        out['paths'].append({'from': a, 'to': b, 'beta': beta})
+    if method == 'CB':
+        cb = cfa(complete.cov(), len(complete), blocks)
+        loadings = cb['loadings']
+        out['fit'] = cb['fit']
+        out['converged'] = cb['converged']
+        out['sentences'].append('Measurement model (CFA): ' + ', '.join('%s = %s' % (k, v) for k, v in cb['fit'].items() if v is not None) + '.')
+    out['loadings'] = {c: [float(x) for x in loadings[c]] for c in names}
+    # Bootstrap: resample complete cases to get standard errors and significance for each path.
+    boot_n = min(1000, max(0, int(spec.get('bootstrap') or 200)))
+    if paths and boot_n:
+        rng = np.random.default_rng(rng_seed)
+        draws = {pth: [] for pth in paths}
+        for _ in range(boot_n):
+            idx = rng.integers(0, len(Z), len(Z))
+            Zb = Z.iloc[idx].reset_index(drop=True)
+            Pb = pls(Zb, blocks, paths, max_iter=100, tol=1e-5)
+            for pth in paths:
+                if pth in Pb['beta']:
+                    draws[pth].append(Pb['beta'][pth])
+        for row in out['paths']:
+            d = np.array(draws[(row['from'], row['to'])])
+            se = float(d.std(ddof=1)) if d.size > 1 else float('nan')
+            t = row['beta'] / se if se and not math.isnan(se) and se > 0 else float('nan')
+            row['se'] = se
+            row['t'] = t
+            row['p'] = float(2 * stats.norm.sf(abs(t))) if not math.isnan(t) else float('nan')
+            out['sentences'].append('%s → %s: β = %s, SE = %s, t = %.2f, %s.' % (row['from'], row['to'], num_text(row['beta']),
+                                    num_text(se), t, p_text(row['p'])))
+        out['bootstrap'] = boot_n
+    for n_, r2 in P['r2'].items():
+        out['sentences'].append('R² for %s = %s.' % (n_, num_text(r2)))
+    return out
+
+
 def run_analyses(df, spec):
     """spec: {'describe': [cols], 'reliability': [{'name': 'Service', 'items': [...]}],
               'correlations': [cols], 'regression': {'y': col, 'x': [cols]}}"""
@@ -144,4 +210,7 @@ def run_analyses(df, spec):
         res = ols(df, reg['y'], reg['x'])
         out['regression'] = res
         out['sentences'].append(_apa_regression(res, reg['y'], reg['x']))
+    if spec.get('constructs'):
+        out['sem'] = sem_models(df, spec)
+        out['sentences'].extend(out['sem']['sentences'])
     return out
