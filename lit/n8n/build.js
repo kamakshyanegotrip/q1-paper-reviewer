@@ -29,11 +29,23 @@ if (typeof URLSearchParams === 'undefined') {
 }
 `;
 
+const FINISH = `
+const { finishLiterature } = __req('pipeline');
+const prep = $('Literature engine').first().json || {};
+const out = $input.first().json || {};
+let text = '', error = '';
+if (!prep.early) {
+  if (out.error) error = String(out.error.message || JSON.stringify(out.error)).slice(0, 300);
+  else text = ((out.candidates && out.candidates[0] && out.candidates[0].content && out.candidates[0].content.parts) || []).map(p => p.text || '').join('');
+}
+const result = finishLiterature({ prep, text, error });
+return [{ json: Object.assign({}, result, { searched: prep.searched, sourceErrors: prep.sourceErrors }) }];
+`;
+
 const RUNNER = `
 // ---- runner ----
 const OA = __req('openalex'), EPMC = __req('europepmc'), DOAJ = __req('doaj'), CORE = __req('core'), GREY = __req('grey');
-const { runLiteratureReview } = __req('pipeline');
-const MODEL = 'claude-sonnet-5-5';
+const { prepareLiterature, finishLiterature } = __req('pipeline');
 const MAILTO = ''; // env vars are blocked in Code nodes on this n8n server
 
 // The engine's input is the auth checker's output, so read the form from the webhook node.
@@ -41,12 +53,12 @@ const hook = $("Literature webhook").first().json || {};
 const b = hook.body || hook;
 const question = String(b.question || '').trim();
 let queries = [], f = {};
-try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { ok: false, reason: 'Malformed queries or filters' } }]; }
+try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { early: { ok: false, reason: 'Malformed queries or filters' } } }]; }
 const auth = $("Call 'Q1 Auth - Check Key'").first().json || {};
 if (auth.authorized !== true)
-  return [{ json: { ok: false, reason: 'Not authorised' } }];
+  return [{ json: { early: { ok: false, reason: 'Not authorised' } } }];
 if (!question || !queries.length)
-  return [{ json: { ok: false, reason: 'A research question and at least one search query are required' } }];
+  return [{ json: { early: { ok: false, reason: 'A research question and at least one search query are required' } } }];
 
 const includeGrey = f.includeGrey !== false;
 const yearFrom = f.yearFrom || null;
@@ -63,15 +75,14 @@ for (const q of queries.slice(0, 8)) {
   if (includeGrey) await run('grey', () => GREY.search(q, { yearFrom, perPage: 25, mailto: MAILTO }, fetchJson));
 }
 
-// AI write-up is off until the key can be provided without env vars (see notes).
-const llm = null;
-
 const types = includeGrey ? ['article', 'review', 'conference', 'grey'] : ['article', 'review', 'conference'];
-const result = await runLiteratureReview({
-  question, records, style: b.style || '', llm, maxAttempts: 3,
+const prep = prepareLiterature({
+  question, records, style: b.style || '',
   filters: { types, yearFrom, minCitations: f.minCitations == null ? null : f.minCitations, dropRetracted: true, dedupe: true }
 });
-return [{ json: Object.assign({}, result, { searched: records.length, sourceErrors: errors }) }];
+if (auth.authorized !== true) prep.early = { ok: false, reason: 'Not authorised' };
+return [{ json: Object.assign({}, prep, { searched: records.length, sourceErrors: errors }) }];
+// The next node (Gemini) sends prep.prompt; the finish node reads this output back by name.
 `;
 
 function workflow() {
@@ -83,12 +94,25 @@ function workflow() {
         id: 'lit-webhook', name: 'Literature webhook', type: 'n8n-nodes-base.webhook', typeVersion: 2, position: [0, 200], webhookId: 'q1-literature-run' },
       { parameters: { jsCode: code },
         id: 'lit-engine', name: 'Literature engine', type: 'n8n-nodes-base.code', typeVersion: 2, position: [260, 200] },
+      // Gemini free tier. Uses the existing Google Gemini (PaLM) API credential, chosen in the node.
+      // Replace MODEL_ID with the model name the review engine uses (see its Create Review ID & Config node).
+      { parameters: {
+          method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/MODEL_ID:generateContent',
+          authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
+          sendBody: true, specifyBody: 'json',
+          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 3000, temperature: 0.2 } } }}",
+          options: {} },
+        id: 'lit-gemini', name: 'Gemini draft', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [500, 200], continueOnFail: true },
+      { parameters: { jsCode: SHIM + bundle() + '\n' + FINISH },
+        id: 'lit-finish', name: 'Literature finish', type: 'n8n-nodes-base.code', typeVersion: 2, position: [740, 200] },
       { parameters: { respondWith: 'json', responseBody: '={{ $json }}', options: {} },
-        id: 'lit-respond', name: 'Respond', type: 'n8n-nodes-base.respondToWebhook', typeVersion: 1.1, position: [520, 200] }
+        id: 'lit-respond', name: 'Respond', type: 'n8n-nodes-base.respondToWebhook', typeVersion: 1.1, position: [980, 200] }
     ],
     connections: {
       'Literature webhook': { main: [[{ node: 'Literature engine', type: 'main', index: 0 }]] },
-      'Literature engine': { main: [[{ node: 'Respond', type: 'main', index: 0 }]] }
+      'Literature engine': { main: [[{ node: 'Gemini draft', type: 'main', index: 0 }]] },
+      'Gemini draft': { main: [[{ node: 'Literature finish', type: 'main', index: 0 }]] },
+      'Literature finish': { main: [[{ node: 'Respond', type: 'main', index: 0 }]] }
     },
     settings: { executionOrder: 'v1' },
     active: false
@@ -99,4 +123,4 @@ if (require.main === module) {
   fs.writeFileSync(path.join(__dirname, 'workflow.json'), JSON.stringify(workflow(), null, 2));
   console.log('wrote lit/n8n/workflow.json');
 }
-module.exports = { workflow, bundle, RUNNER };
+module.exports = { workflow, bundle, RUNNER, FINISH };
