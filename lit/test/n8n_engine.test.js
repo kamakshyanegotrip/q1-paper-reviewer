@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 const { workflow } = require('../n8n/build');
 
 const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const authOk = { authorized: true, role: 'admin', user_id: 1 };
+const authNo = { authorized: false, role: '', user_id: null };
 const code = workflow().nodes.find(n => n.name === 'Literature engine').parameters.jsCode;
 
 function mockHttp(calls) {
@@ -29,9 +31,10 @@ function mockHttp(calls) {
   };
 }
 
-async function runNode(body, env, calls) {
-  const fn = new AsyncFunction('$input', '$helpers', '$env', code);
-  return fn({ first: () => ({ json: { body } }) }, { httpRequest: mockHttp(calls) }, env);
+async function runNode(body, env, calls, auth = authOk) {
+  const fn = new AsyncFunction('$input', '$helpers', '$env', '$', code);
+  const $ = () => ({ first: () => ({ json: auth }) });
+  return fn({ first: () => ({ json: { body } }) }, { httpRequest: mockHttp(calls) }, env, $);
 }
 
 const goodBody = {
@@ -39,20 +42,20 @@ const goodBody = {
   queries: JSON.stringify(['medical visa demand']), style: 'mla', filters: JSON.stringify({ includeGrey: true })
 };
 
-test('draft workflow: refuses requests without an allowed key', async () => {
-  const out = await runNode({ ...goodBody, key: 'wrong' }, { Q1_LIT_KEYS: 'q1k-test' }, []);
+test('draft workflow: refuses requests the checker does not authorise', async () => {
+  const out = await runNode(goodBody, {}, [], authNo);
   assert.equal(out[0].json.ok, false);
   assert.match(out[0].json.reason, /Not authorised/);
 });
 
-test('draft workflow: refuses when no keys are configured at all', async () => {
-  const out = await runNode(goodBody, {}, []);
+test('draft workflow: refuses when the key checker does not authorise', async () => {
+  const out = await runNode(goodBody, {}, [], authNo);
   assert.match(out[0].json.reason, /Not authorised/);
 });
 
 test('draft workflow: end to end with mocked sources keeps trusted grey and cites real keys', async () => {
   const calls = [];
-  const out = await runNode(goodBody, { Q1_LIT_KEYS: 'q1k-test', ANTHROPIC_API_KEY: 'x', LIT_CONTACT_EMAIL: 'ops@example.org' }, calls);
+  const out = await runNode(goodBody, { ANTHROPIC_API_KEY: 'x', LIT_CONTACT_EMAIL: 'ops@example.org' }, calls);
   const j = out[0].json;
   assert.equal(j.ok, true, JSON.stringify(j).slice(0, 400));
   assert.ok(calls.some(u => u.includes('api.openalex.org')));
@@ -70,7 +73,7 @@ test('draft workflow: end to end with mocked sources keeps trusted grey and cite
 
 test('draft workflow: reports-as-articles from OpenAlex do not bypass the grey gate', async () => {
   const calls = [];
-  const out = await runNode({ ...goodBody, filters: JSON.stringify({ includeGrey: false }) }, { Q1_LIT_KEYS: 'q1k-test', ANTHROPIC_API_KEY: 'x' }, calls);
+  const out = await runNode({ ...goodBody, filters: JSON.stringify({ includeGrey: false }) }, { ANTHROPIC_API_KEY: 'x' }, calls);
   const texts = out[0].json.references ? out[0].json.references.map(r => r.text).join(' ') : '';
   assert.doesNotMatch(texts, /Official report on medical tourism/);
 });

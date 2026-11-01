@@ -32,8 +32,8 @@ const b = ($input.first().json.body) || $input.first().json;
 const question = String(b.question || '').trim();
 let queries = [], f = {};
 try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { ok: false, reason: 'Malformed queries or filters' } }]; }
-const ALLOWED = String($env.Q1_LIT_KEYS || '').split(',').map(s => s.trim()).filter(Boolean);
-if (!ALLOWED.length || !ALLOWED.includes(String(b.key || '')))
+const auth = $("Call 'Q1 Auth - Check Key'").first().json || {};
+if (auth.authorized !== true)
   return [{ json: { ok: false, reason: 'Not authorised' } }];
 if (!question || !queries.length)
   return [{ json: { ok: false, reason: 'A research question and at least one search query are required' } }];
