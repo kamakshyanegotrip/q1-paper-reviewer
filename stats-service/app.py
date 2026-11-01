@@ -15,6 +15,7 @@ import numpy as np
 import pandas as pd
 from scipy import optimize, stats
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+import analysis as analysis_mod
 
 TOKEN = os.environ.get("Q1_STATS_TOKEN", "")
 app = FastAPI(title="Q1 stats service", version="1.0")
@@ -458,3 +459,22 @@ async def analyze(file: UploadFile = File(...), spec: str = Form("{}"), x_q1_tok
     out["comparisons"] = comps
     out["warnings"] = warnings
     return out
+
+
+@app.post("/analyze-data")
+async def analyze_data(file: UploadFile = File(...), spec: str = Form("{}"), x_q1_token: str = Header(default="")):
+    """Descriptives, reliability, correlations and regression for the Writing page. No data is stored."""
+    if TOKEN and x_q1_token != TOKEN:
+        raise HTTPException(401, "bad token")
+    raw = await file.read()
+    if len(raw) > 25 * 1024 * 1024:
+        raise HTTPException(413, "dataset larger than 25 MB")
+    try:
+        sp = json.loads(spec or "{}")
+    except Exception:
+        raise HTTPException(400, "spec is not valid JSON")
+    try:
+        df = analysis_mod.load_frame(raw, file.filename or "")
+        return analysis_mod.run_analyses(df, sp)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
