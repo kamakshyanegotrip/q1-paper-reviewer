@@ -28,7 +28,9 @@ const { runLiteratureReview } = __req('pipeline');
 const MODEL = 'claude-sonnet-5-5';
 const MAILTO = ''; // env vars are blocked in Code nodes on this n8n server
 
-const b = ($input.first().json.body) || $input.first().json;
+// The engine's input is the auth checker's output, so read the form from the webhook node.
+const hook = $("Literature webhook").first().json || {};
+const b = hook.body || hook;
 const question = String(b.question || '').trim();
 let queries = [], f = {};
 try { queries = JSON.parse(b.queries || '[]'); f = JSON.parse(b.filters || '{}'); } catch (e) { return [{ json: { ok: false, reason: 'Malformed queries or filters' } }]; }
