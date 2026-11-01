@@ -89,3 +89,24 @@ test('without sources the prompt asks for no citations', () => {
   assert.doesNotMatch(p, /\{\{cite:KEY\}\}/);
   assert.match(p, /Make no citations/);
 });
+
+test('a hint is added to the section prompt when given', () => {
+  const p = P.buildSectionPrompt({ type: 'empirical:q1', section: 'introduction', words: 300, points: 'Causes', project: {}, prior: [], hint: 'Bone marrow disease causes' });
+  assert.match(p, /framing hint.*Bone marrow disease causes/);
+});
+
+test('a revision needs a modification type and a known mode', () => {
+  const base = { type: 'empirical:q1', section: 'results', paragraph: 'Scores rose.', mode: 'connect' };
+  assert.throws(() => P.buildRevisePrompt(Object.assign({}, base, { modification: '' })), /modification type/);
+  assert.throws(() => P.buildRevisePrompt(Object.assign({}, base, { mode: 'rewrite', modification: 'analytical' })), /mode/);
+});
+
+test('connect uses the previous paragraph; discuss uses the instruction; cite adds length', () => {
+  const connect = P.buildRevisePrompt({ type: 'empirical:q1', section: 'results', paragraph: 'Scores rose.', previous: 'Earlier text.', mode: 'connect', modification: 'analytical' });
+  assert.match(connect, /Previous paragraph[\s\S]*Earlier text/);
+  const discuss = P.buildRevisePrompt({ type: 'empirical:q1', section: 'results', paragraph: 'Scores rose.', mode: 'discuss', modification: 'argumentative', instruction: 'Argue the rise is seasonal' });
+  assert.match(discuss, /Argue the rise is seasonal/);
+  const cite = P.buildRevisePrompt({ type: 'empirical:q1', section: 'results', paragraph: Array(100).fill('w').join(' '), mode: 'cite', modification: 'theory', sourcesText: '[K1] Source' });
+  assert.match(cite, /about 160 words/);
+  assert.match(cite, /\{\{cite:KEY\}\}/);
+});

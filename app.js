@@ -309,9 +309,36 @@
   const PL = window.Q1Plan;
   const WRITE_PATH = CFG.writePath || '/q1-write-section';
   const STYLES = [['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']];
+  const MODIFICATIONS = [['argumentative', 'Argumentative'], ['discussion', 'Discussion-based'], ['analytical', 'Analytical'], ['theory', 'Theory-based (aligning theory)']];
+  // Paragraphs are separated by a blank line.
+  const paraList = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
   const STATE_TAG = {
     drafted: ['ok', 'drafted'], ready: ['', 'ready to write'], needs_input: ['warn', 'needs input'], locked: ['', 'locked'], missing: ['', 'unknown']
   };
+
+  // The modification-type choice and the actions for a paragraph or a whole section.
+  const modSelect = () => `<select data-mtype style="font-size:13px"><option value="">Modification type…</option>${MODIFICATIONS.map(m => `<option value="${m[0]}">${m[1]}</option>`).join('')}</select>`;
+  const actionButtons = (sid, idx, first) => `<button class="btn btn-sm" type="button" data-revise="connect" data-sec-id="${esc(sid)}" data-idx="${idx}"${first ? ' disabled title="The first paragraph has no previous paragraph to connect to"' : ''}>Modify to suit previous paragraph</button>
+      <button class="btn btn-sm" type="button" data-discuss-toggle="${esc(sid)}:${idx}">Modify by AI discussion</button>
+      <button class="btn btn-sm" type="button" data-revise="cite" data-sec-id="${esc(sid)}" data-idx="${idx}">Add content and literature</button>`;
+  const discussBox = (sid, idx) => `<div data-discuss-box="${esc(sid)}:${idx}" hidden style="margin-top:6px"><textarea rows="2" data-instr="${esc(sid)}:${idx}" placeholder="What should change? e.g. argue that the cost barrier is overstated" style="width:100%"></textarea><button class="btn btn-sm" type="button" data-revise="discuss" data-sec-id="${esc(sid)}" data-idx="${idx}" style="margin-top:4px">Run the change</button></div>`;
+  function renderParas(sid, text) {
+    return paraList(text).map((p, j) => `
+      <div class="para" style="border-left:3px solid #d9d2c3;padding-left:10px;margin:10px 0">
+        <textarea rows="4" data-para="${esc(sid)}" data-idx="${j}" style="width:100%">${esc(p)}</textarea>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${modSelect()} ${actionButtons(sid, j, j === 0)}</div>
+        ${discussBox(sid, j)}
+      </div>`).join('');
+  }
+  // Same actions on the whole section, for changes that span paragraphs.
+  function sectionTools(sid) {
+    return `<div style="border-top:1px dashed #d9d2c3;padding-top:8px;margin-top:8px">
+      <div style="font-size:13px;margin-bottom:6px"><b>Whole section</b></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${modSelect()}
+        <button class="btn btn-sm" type="button" data-discuss-toggle="${esc(sid)}:all">Modify by AI discussion</button>
+        <button class="btn btn-sm" type="button" data-revise="cite" data-sec-id="${esc(sid)}" data-idx="all">Add content and literature</button></div>
+      ${discussBox(sid, 'all')}</div>`;
+  }
 
   function renderWriting() {
     const base = { type: 'empirical:q1', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '', results: '', target: 6000, budgets: {}, points: {} };
@@ -385,10 +412,15 @@
             <div class="finding-top"><span class="id">${i + 1}</span><b>${esc(s.title)}</b><span class="tag ${cls}">${label}</span><span class="muted" style="font-size:13px">${words(s.id)} words planned</span></div>
             <p class="muted" style="font-size:14px;margin:4px 0 8px">${esc(s.brief)}</p>
             ${waits}${needs}
+            <button class="btn btn-ghost btn-sm" type="button" data-hint-toggle="${esc(s.id)}" aria-expanded="false">+ Hint for this section</button>
+            <div data-hint-box="${esc(s.id)}" hidden style="margin:8px 0">
+              <label class="field"><span>Hint <i>a topic or angle; the literature and the text are framed around it, e.g. “causes of bone marrow disease”</i></span><textarea rows="2" data-hint="${esc(s.id)}">${esc((proj.hints || {})[s.id] || '')}</textarea></label>
+            </div>
             <label class="field"><span>Content points for this section <i>one per line</i></span><textarea rows="3" data-points="${esc(s.id)}">${esc((proj.points || {})[s.id] || '')}</textarea></label>
             <button class="btn btn-sm" type="button" data-write="${esc(s.id)}" ${st.state === 'ready' || st.state === 'drafted' ? '' : 'disabled'}>${d.text ? 'Write again' : 'Write this section'}</button>
             ${counted ? `<span class="muted" style="font-size:13px;margin-left:8px">${counted.count} of ${counted.words} words ${counted.ok ? '' : '(outside 10%)'}</span>` : ''}
-            <div data-out="${esc(s.id)}">${d.text ? `<textarea rows="8" data-edit="${esc(s.id)}" style="width:100%;margin-top:10px">${esc(d.text)}</textarea>` : ''}</div>
+            <div data-out="${esc(s.id)}">${d.text ? renderParas(s.id, d.text) : ''}</div>
+            ${d.text ? sectionTools(s.id) : ''}
           </article>`;
         }).join('')}
         ${sections.some(s => s.id === 'references') ? `
@@ -451,7 +483,7 @@
       const idx = sections.findIndex(s => s.id === id);
       const prior = sections.slice(0, idx).filter(s => d0[s.id] && d0[s.id].text).map(s => ({ title: s.title, text: d0[s.id].text }));
       const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
-      const bodyParams = { type, section: id, words: planned, points: (cur.points || {})[id] || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior) };
+      const bodyParams = { type, section: id, words: planned, points: (cur.points || {})[id] || '', hint: (cur.hints || {})[id] || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior) };
       setStatus(`Writing “${title}” (about ${planned} words)… this can take up to a minute.`);
       if (btn) btn.disabled = true;
       try {
@@ -490,11 +522,76 @@
       renderWriting();
     });
 
-    app.querySelectorAll('textarea[data-edit]').forEach(t => t.addEventListener('change', () => {
+    // Hint: opens the section's hint field and saves what is typed.
+    app.querySelectorAll('button[data-hint-toggle]').forEach(b => b.addEventListener('click', () => {
+      const box = app.querySelector(`[data-hint-box="${b.dataset.hintToggle}"]`);
+      const open = box.hidden; box.hidden = !open; b.setAttribute('aria-expanded', String(open));
+    }));
+    app.querySelectorAll('textarea[data-hint]').forEach(t => t.addEventListener('change', () => {
+      const cur = store.get('wr:project', proj) || proj;
+      store.set('wr:project', Object.assign({}, cur, { hints: Object.assign({}, cur.hints || {}, { [t.dataset.hint]: t.value }) }));
+    }));
+
+    // Paragraph edits by hand: the draft is rebuilt from its paragraphs.
+    app.querySelectorAll('textarea[data-para]').forEach(t => t.addEventListener('change', () => {
+      const sid = t.dataset.para, idx = Number(t.dataset.idx);
       const all = store.get('wr:drafts', {}) || {};
-      all[t.dataset.edit] = Object.assign({}, all[t.dataset.edit] || {}, { text: t.value, at: new Date().toISOString() });
+      const paras = paraList((all[sid] || {}).text || '');
+      paras[idx] = t.value.trim();
+      all[sid] = Object.assign({}, all[sid] || {}, { text: paras.filter(Boolean).join('\n\n'), at: new Date().toISOString() });
       store.set('wr:drafts', all);
       renderWriting();
+    }));
+
+    app.querySelectorAll('button[data-discuss-toggle]').forEach(b => b.addEventListener('click', () => {
+      const box = app.querySelector(`[data-discuss-box="${b.dataset.discussToggle}"]`);
+      box.hidden = !box.hidden;
+    }));
+
+    // Revision: rewrites one paragraph (or the whole section) with the chosen mode and modification type.
+    const runRevise = async (sid, idx, mode, instruction, scope) => {
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      const block = scope || app;
+      const mtype = block.querySelector('[data-mtype]') ? block.querySelector('[data-mtype]').value : '';
+      if (!mtype) { setStatus('Choose a modification type first.'); return; }
+      const cur = store.get('wr:project', proj) || proj;
+      const d0 = store.get('wr:drafts', {}) || {};
+      const draft = (d0[sid] || {}).text || '';
+      const paras = paraList(draft);
+      const whole = idx === 'all';
+      const paragraph = whole ? draft : paras[Number(idx)];
+      if (!paragraph) { setStatus('That paragraph is empty.'); return; }
+      const title = (sections.find(x => x.id === sid) || { title: sid }).title;
+      const idxSec = sections.findIndex(x => x.id === sid);
+      const prior = sections.slice(0, idxSec).filter(x => d0[x.id] && d0[x.id].text).map(x => ({ title: x.title, text: d0[x.id].text }));
+      const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
+      const body = { action: 'revise', type, section: sid, mode, modification: mtype, paragraph, previous: whole || Number(idx) === 0 ? '' : paras[Number(idx) - 1], instruction: instruction || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior), hint: (cur.hints || {})[sid] || '', words: PL.countWords(paragraph) };
+      setStatus(`Revising a paragraph of “${title}”… this can take up to a minute.`);
+      try {
+        const d = await apiPostForm(WRITE_PATH, body);
+        if (!d.ok) throw new Error(d.reason || 'The paragraph could not be revised.');
+        const all = store.get('wr:drafts', {}) || {};
+        const old = all[sid] || {};
+        const text = whole ? d.text : paras.map((x, j) => (j === Number(idx) ? d.text : x)).join('\n\n');
+        const refs = (old.references || []).concat((d.references || []).filter(r => !(old.references || []).some(o => o.text === r.text)));
+        all[sid] = Object.assign({}, old, { text, labels: Object.assign({}, old.labels || {}, d.labels || {}), references: refs, at: new Date().toISOString() });
+        store.set('wr:drafts', all);
+        setStatus(`Revised a paragraph of “${title}”${d.warning ? '. Check: ' + d.warning : '.'}`);
+        renderWriting();
+      } catch (e) {
+        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the revision step is not set up on the server.' : `Could not revise: ${e.message}`);
+      }
+    };
+    app.querySelectorAll('button[data-revise]').forEach(b => b.addEventListener('click', () => {
+      const block = b.closest('.para') || b.closest('[data-sec]') || app;
+      const mode = b.dataset.revise;
+      const sid = b.dataset.secId, idx = b.dataset.idx;
+      if (mode === 'discuss') {
+        const instr = app.querySelector(`[data-instr="${sid}:${idx}"]`);
+        if (!instr || !instr.value.trim()) { setStatus('Write what should change first.'); return; }
+        return runRevise(sid, idx, 'discuss', instr.value.trim(), block);
+      }
+      runRevise(sid, idx, mode, '', block);
     }));
   }
 

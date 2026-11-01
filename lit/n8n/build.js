@@ -131,7 +131,7 @@ function workflow() {
 
 // ---- section writer (Writing from scratch): its own workflow, same bundled code ----
 const WRITE_RUNNER = `
-// Writes one section of a "Writing from scratch" document.
+// Writes one section of a "Writing from scratch" document, or revises one paragraph (action: revise).
 const hook = $("Write webhook").first().json || {};
 const b = hook.body || hook;
 const auth = $("Call 'Q1 Auth - Check Key'").first().json || {};
@@ -152,8 +152,17 @@ catch (e) { return [{ json: { early: { ok: false, reason: 'Malformed project or 
 prior = (Array.isArray(prior) ? prior : []).slice(0, 8).map(x => ({ title: String(x.title || '').slice(0, 120), text: String(x.text || '').slice(0, 8000) }));
 const words = Math.max(0, Math.round(Number(b.words) || 0));
 const points = String(b.points || '').slice(0, 4000);
-if (!points.trim())
+const hint = String(b.hint || '').slice(0, 1000);
+const revise = b.action === 'revise';
+const paragraph = String(b.paragraph || '').slice(0, 6000);
+if (revise) {
+  if (!paragraph.trim()) return [{ json: { early: { ok: false, reason: 'Choose a paragraph to revise' } } }];
+  if (!P.REVISE_MODES[b.mode]) return [{ json: { early: { ok: false, reason: 'Choose how to revise: connect, discuss or cite' } } }];
+  if (!P.MODIFICATIONS[b.modification]) return [{ json: { early: { ok: false, reason: 'Choose a modification type first' } } }];
+  if (b.mode === 'discuss' && !String(b.instruction || '').trim()) return [{ json: { early: { ok: false, reason: 'Write the instruction for the AI first' } } }];
+} else if (!points.trim()) {
   return [{ json: { early: { ok: false, reason: 'Add the content points for this section first' } } }];
+}
 
 // n8n Code nodes expose the HTTP helper as this.helpers (not $helpers) and may lack URLSearchParams.
 const HTTP = (typeof $helpers !== 'undefined' && $helpers) || (this && this.helpers);
@@ -162,8 +171,10 @@ const records = [], errors = [];
 const run = async (name, fn) => { try { records.push(...(await fn())); } catch (e) { errors.push(name + ': ' + e.message); } };
 
 // Body sections are sourced from the literature search; abstracts, titles and references are not.
-const queries = [project.question, project.topic].concat(points.split('\\n')).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
-if (sec.fixed == null) {
+const queries = revise
+  ? [project.question, project.topic, hint, paragraph.slice(0, 200)].map(x => String(x || '').trim()).filter(Boolean).slice(0, 4)
+  : [project.question, project.topic, hint].concat(points.split('\\n')).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
+if (revise ? b.mode === 'cite' : sec.fixed == null) {
   for (const q of queries) {
     await run('openalex', () => OA.searchOpenAlex(q, { yearFrom: null, perPage: 25, mailto: MAILTO }, fetchJson));
     await run('europepmc', () => EPMC.search(q, { yearFrom: null, pageSize: 25 }, fetchJson));
@@ -175,8 +186,11 @@ const filt = F.filterSources(records, { types: ['article', 'review', 'conference
 const kept = filt.kept || [];
 const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';
-const prompt = P.buildSectionPrompt({ type, section, words, points, project, prior, sourcesText });
-const prep = { early: null, kept, style, log: filt.log, excluded: filt.excluded, prompt, words, searched: records.length, sourceErrors: errors };
+const prompt = revise
+  ? P.buildRevisePrompt({ type, section, paragraph, previous: String(b.previous || '').slice(0, 6000), mode: b.mode, modification: b.modification, instruction: String(b.instruction || '').slice(0, 1000), sourcesText, style: String(b.style || ''), project })
+  : P.buildSectionPrompt({ type, section, words, points, project, prior, sourcesText, hint });
+const budget = revise ? P.countWords(paragraph) : words;
+const prep = { early: null, kept, style, log: filt.log, excluded: filt.excluded, prompt, words: budget, searched: records.length, sourceErrors: errors };
 return [{ json: prep }];
 // The Gemini node sends prep.prompt; the finish node reads this output back by name.
 `;

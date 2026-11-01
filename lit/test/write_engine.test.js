@@ -89,3 +89,32 @@ test('a failed model call returns ok false with the reason', async () => {
   assert.equal(r.out.ok, false);
   assert.match(r.out.reason, /quota exceeded/);
 });
+
+test('a connect revision is rewritten from the previous paragraph without a search', async () => {
+  const calls = [];
+  const r = await runWriter({ ...base, action: 'revise', mode: 'connect', modification: 'analytical', paragraph: 'Visa rules shape demand.', previous: 'Earlier paragraph.' },
+    { calls, gemini: 'Building on that, visa rules shape demand.' });
+  assert.equal(r.out.ok, true, JSON.stringify(r.out).slice(0, 300));
+  assert.match(r.engine.prompt, /Previous paragraph[\s\S]*Earlier paragraph/);
+  assert.ok(!calls.some(c => c.includes('api.openalex.org')));
+});
+
+test('an add-content revision searches the literature and cites the new sources', async () => {
+  const calls = [];
+  const r = await runWriter({ ...base, action: 'revise', mode: 'cite', modification: 'theory', paragraph: 'Visa rules shape demand.' }, { calls });
+  assert.equal(r.out.ok, true, JSON.stringify(r.out).slice(0, 300));
+  assert.ok(calls.some(c => c.includes('api.openalex.org')));
+  assert.match(r.engine.prompt, /key: 10\.1\/visa/);
+});
+
+test('a revision without a modification type is refused', async () => {
+  const r = await runWriter({ ...base, action: 'revise', mode: 'connect', modification: '', paragraph: 'Text.' });
+  assert.equal(r.out.ok, false);
+  assert.match(r.out.reason, /modification type/);
+});
+
+test('the section hint is used in the section prompt', async () => {
+  const r = await runWriter({ ...base, hint: 'Bone marrow disease causes' });
+  assert.equal(r.out.ok, true);
+  assert.match(r.engine.prompt, /Bone marrow disease causes/);
+});

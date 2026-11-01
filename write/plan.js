@@ -72,7 +72,7 @@
   const clip = (t, n) => { const s = String(t || ''); return s.length > n ? s.slice(0, n) + ' …' : s; };
 
   // The prompt for one section. sourcesText is the list of kept sources with their citation keys.
-  function buildSectionPrompt({ type, section, words, points, project = {}, prior = [], sourcesText = '' }) {
+  function buildSectionPrompt({ type, section, words, points, project = {}, prior = [], sourcesText = '', hint = '' }) {
     const t = T.REPORT_TYPES[type] || { label: 'document' };
     const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '', needs: [] };
     const pointLines = String(points || '').split('\n').map(x => x.trim()).filter(Boolean);
@@ -93,6 +93,7 @@
       'Cover these content points, in this order:',
       ...pointLines.map((p, i) => `${i + 1}. ${p}`)
     ];
+    if (String(hint || '').trim()) lines.push(`Author's framing hint (build the section around this): ${String(hint).trim()}`);
     if (s.needs.includes('results') && project.results) lines.push(`Results provided (use only these):\n${project.results}`);
     if (s.needs.includes('notes') && project.notes) lines.push(`Data, method and notes provided:\n${project.notes}`);
     if (prior.length) lines.push('Earlier sections (keep consistent with them):\n' + prior.map(p => `## ${p.title}\n${clip(p.text, 2500)}`).join('\n\n'));
@@ -100,7 +101,48 @@
     return lines.join('\n');
   }
 
-  const api = { buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, INPUT_LABELS, TOLERANCE };
+
+  // Ways to revise one paragraph. Each needs a modification type, so the change has a purpose.
+  const REVISE_MODES = {
+    connect: 'Rewrite the paragraph so it follows smoothly from the previous paragraph: link ideas, carry over terms, and remove repetition. Keep its claims.',
+    discuss: 'Revise the paragraph as the author instructs below. Change only what the instruction asks for.',
+    cite: 'Add more content and literature to the paragraph. Use the sources listed, citing each new claim with {{cite:KEY}}, and keep the existing claims.'
+  };
+  const MODIFICATIONS = {
+    argumentative: 'Make the argument explicit: a clear claim, the reasons for it, and the counter-argument answered.',
+    discussion: 'Make it discussion-based: interpret the evidence, compare it with the literature, and say what it means.',
+    analytical: 'Make it analytical: break the point into its parts, examine how they relate, and show the mechanism.',
+    theory: 'Make it theory-based: align the point with the named theory or framework and show what the theory explains.'
+  };
+
+  // The prompt to revise one paragraph. mode is connect, discuss or cite; modification is a key of MODIFICATIONS.
+  function buildRevisePrompt({ type, section, paragraph, previous = '', mode, modification, instruction = '', sourcesText = '', style = '', project = {} }) {
+    if (!REVISE_MODES[mode]) throw new Error('Unknown revision mode');
+    if (!MODIFICATIONS[modification]) throw new Error('Choose a modification type first');
+    const s = sectionsOf(type).find(x => x.id === section) || { title: section };
+    const words = countWords(paragraph);
+    const target = mode === 'cite' ? Math.max(40, Math.round(words * 1.6)) : words;
+    const lines = [
+      `You are revising one paragraph of the "${s.title}" section of an academic document.`,
+      `Research question: ${project.question || '(not given)'}`,
+      `Task: ${REVISE_MODES[mode]}`,
+      `Type of change: ${MODIFICATIONS[modification]}`,
+      'Rules:',
+      '- Return only the revised paragraph, with no heading and no commentary.',
+      '- Do not invent facts, figures or citations. Use only the sources listed below.',
+      sourcesText ? '- Keep every {{cite:KEY}} citation that is still relevant, using the exact key shown.' : '- Make no citations; no sources were provided.',
+      `- Length: about ${target} words.`,
+      '- Write in formal academic English.'
+    ];
+    if (mode === 'connect' && previous) lines.push(`Previous paragraph (connect to it):\n${previous}`);
+    if (mode === 'discuss') lines.push(`Author's instruction: ${String(instruction || '').trim() || '(none given)'}`);
+    lines.push(`Paragraph to revise:\n${paragraph}`);
+    if (sourcesText) lines.push(`Sources:\n${sourcesText}`);
+    if (style) lines.push(`Citation style: ${style}`);
+    return lines.join('\n');
+  }
+
+  const api = { buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);
