@@ -787,7 +787,7 @@
     const tabs = [
       ['overview', 'Overview'], ['comments', 'Comments', arr(S.major_comments).length + arr(S.minor_comments).length],
       ['findings', 'Validate findings', actionable.length], ['audits', 'Consistency audits'], ['references', 'References', (R.references && R.references.summary && R.references.summary.checked) || 0],
-      ['journals', 'Best-fit journals', R.journal_fit && R.journal_fit.ok ? arr(R.journal_fit.journals).length : undefined], ['roadmap', 'Revision roadmap'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
+      ['journals', 'Best-fit journals', R.journal_fit && R.journal_fit.ok ? arr(R.journal_fit.journals).length : undefined], ['roadmap', 'Revision roadmap'], ['litreview', 'Literature review'], ['letter', 'Reviewer letter'], ['checks', 'All checks', findings.length]
     ];
     if (R.integrity) tabs.splice(5, 0, ['originality', 'Originality & AI']);
     tabs.splice(3, 0, ['final', 'Final report']);
@@ -832,9 +832,11 @@
       ${R.integrity ? `<section class="tab-panel" data-panel="originality" hidden>${viewOriginality(R.integrity)}</section>` : ''}
       <section class="tab-panel" data-panel="journals" hidden>${viewJournalFitTab(R, id)}</section>
       <section class="tab-panel" data-panel="roadmap" hidden>${viewRoadmap(S, id)}</section>
+      <section class="tab-panel" data-panel="litreview" hidden>${viewLitReview(R, S, id)}</section>
       <section class="tab-panel" data-panel="letter" hidden>${viewLetter(S)}</section>
       <section class="tab-panel" data-panel="checks" hidden>${viewChecksShell(findings)}</section>`;
 
+    const litForm = $('#litForm'); if (litForm) litForm.addEventListener('submit', ev => runLitReview(ev, id));
     $$('.tabs button').forEach(b => b.addEventListener('click', () => {
       $$('.tabs button').forEach(x => { x.classList.toggle('active', x === b); x.setAttribute('aria-selected', x === b); });
       $$('.tab-panel').forEach(p => { p.hidden = p.dataset.panel !== b.dataset.tab; });
@@ -1369,6 +1371,67 @@
     </div>`;
     h += `<div class="card"><h3>Limits of these checks</h3><ul class="clean">${arr(IG.caveats).map(c => `<li>${esc(c)}</li>`).join('')}</ul></div>`;
     return h;
+  }
+
+  // ---------- literature review, built from this review's feedback ----------
+  let litBrief = null;
+  const LIT_STYLES = [['', 'APA 7 (default)'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']];
+  function viewLitReview(R, S, id) {
+    litBrief = window.Q1Brief ? window.Q1Brief.literatureBriefFromReview(R, S) : { question: '', queries: [], gaps: [] };
+    const gapsHtml = litBrief.gaps.length
+      ? `<ul class="clean" style="margin:6px 0 0">${litBrief.gaps.map(g => `<li><small class="muted">${esc(g.source)}</small> — ${esc(g.text)}</li>`).join('')}</ul>`
+      : '<p class="muted" style="margin:6px 0 0">The review raised no literature gaps, so the search uses the paper’s topic only.</p>';
+    return `<div class="card">
+      <div class="card-head"><h2>Literature review from this review’s feedback</h2><small>free sources</small></div>
+      <p class="muted" style="margin-top:0">The search starts from this paper’s topic and the review’s literature gaps below. It draws on OpenAlex and Crossref, plus government and industry reports from trusted publishers (UN Tourism, OECD, WHO, World Bank, Government of India ministries, WTTC and similar). Sci-Hub and Wikipedia are never used. Every citation in the draft points to a source that was actually found.</p>
+      <h3 style="margin:14px 0 4px">Gaps the literature should address</h3>${gapsHtml}
+      <form id="litForm" style="margin-top:16px">
+        <label class="field"><span>Research question</span><textarea name="question" rows="2">${esc(litBrief.question)}</textarea></label>
+        <label class="field"><span>Search queries (one per line)</span><textarea name="queries" rows="5">${esc(litBrief.queries.join('\n'))}</textarea></label>
+        <div class="grid-2">
+          <label class="field"><span>Citation style</span><select name="style">${LIT_STYLES.map(([v, l]) => `<option value="${v}">${esc(l)}</option>`).join('')}</select></label>
+          <label class="field"><span>Published from (year, optional)</span><input type="number" name="yearFrom" min="1900" max="2100" placeholder="No limit"></label>
+          <label class="field"><span>Minimum citations (optional)</span><input type="number" name="minCitations" min="0" placeholder="No limit"></label>
+          <label class="field" style="flex-direction:row;align-items:center;gap:8px"><input type="checkbox" name="includeGrey" checked> <span>Include government and industry reports</span></label>
+        </div>
+        <p class="muted" style="font-size:13.5px">Recency is optional. Theory papers from any year are kept unless you set a start year.</p>
+        <button class="btn btn-primary" type="submit" id="litRun">Build literature review</button>
+        <p class="settings-status" id="litStatus" role="status"></p>
+      </form>
+      <div id="litResult"></div>
+    </div>`;
+  }
+  function renderLitResult(d) {
+    const box = $('#litResult');
+    if (!d.ok) { box.innerHTML = `<p class="form-error">${esc(d.reason || d.error || 'No literature review was produced.')}</p>`; return; }
+    const labels = d.labels || {};
+    const body = String(d.draft || '').replace(/\{\{cite:([^}]+)\}\}/g, (m, k) => ' (' + esc(labels[k] || k) + ')');
+    const excluded = Object.entries((d.log && d.log.excludedBy) || {}).map(([k, v]) => `${esc(k)}: ${v}`).join(' · ');
+    box.innerHTML = `<h3 style="margin-top:18px">Draft review</h3>
+      ${(d.draft ? String(body).split(/\n{2,}/).map(p => `<p>${esc(p)}</p>`).join('') : '<p class="muted">Empty draft.</p>')}
+      <h3 style="margin-top:18px">References (${esc(d.style || 'APA 7')})</h3>
+      <ol class="clean" style="padding-left:20px">${(d.references || []).map(r => `<li style="margin-bottom:8px">${esc(r.text)}${r.foundational ? ' <small class="muted">foundational</small>' : ''}${r.tier ? ` <small class="muted">${esc(r.tier)}</small>` : ''}</li>`).join('')}</ol>
+      ${excluded ? `<p class="muted" style="font-size:13.5px"><b>Excluded during filtering:</b> ${excluded}</p>` : ''}
+      ${d.unresolvedKeys && d.unresolvedKeys.length ? `<p class="form-error">Some citations could not be matched to a source and were removed: ${esc(d.unresolvedKeys.join(', '))}</p>` : ''}`;
+  }
+  async function runLitReview(e, id) {
+    e.preventDefault();
+    const f = e.target, st = $('#litStatus');
+    const queries = f.queries.value.split('\n').map(s => s.trim()).filter(Boolean);
+    if (!queries.length) { st.textContent = 'Add at least one search query.'; return; }
+    if (!settings().api) { openSettings('Connect the review service first.'); return; }
+    const btn = $('#litRun'); btn.disabled = true; st.textContent = 'Searching sources and writing the review. This usually takes a few minutes.';
+    $('#litResult').innerHTML = '';
+    try {
+      const d = await apiPostForm(CFG.literaturePath || '/q1-literature-run', {
+        review_id: id, question: f.question.value.trim(), queries: JSON.stringify(queries), style: f.style.value,
+        filters: JSON.stringify({ yearFrom: f.yearFrom.value ? Number(f.yearFrom.value) : null, minCitations: f.minCitations.value ? Number(f.minCitations.value) : null, includeGrey: f.includeGrey.checked }),
+        gaps: JSON.stringify((litBrief && litBrief.gaps) || [])
+      });
+      st.textContent = ''; renderLitResult(d);
+    } catch (err) {
+      st.textContent = /404/.test(err.message) ? 'The literature service is not connected yet. Its n8n workflow must be published first.' : err.message;
+    } finally { btn.disabled = false; }
   }
 
   // Step-by-step revision plan. Built from revision_roadmap; optional fields
