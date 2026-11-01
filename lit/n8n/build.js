@@ -154,13 +154,17 @@ const words = Math.max(0, Math.round(Number(b.words) || 0));
 const points = String(b.points || '').slice(0, 4000);
 const hint = String(b.hint || '').slice(0, 1000);
 const revise = b.action === 'revise';
+const para = b.action === 'paragraph';
+const point = String(b.point || '').slice(0, 1000);
+if (para && !point.trim())
+  return [{ json: { early: { ok: false, reason: 'The outline point for this paragraph is missing' } } }];
 const paragraph = String(b.paragraph || '').slice(0, 6000);
 if (revise) {
   if (!paragraph.trim()) return [{ json: { early: { ok: false, reason: 'Choose a paragraph to revise' } } }];
   if (!P.REVISE_MODES[b.mode]) return [{ json: { early: { ok: false, reason: 'Choose how to revise: connect, discuss or cite' } } }];
   if (!P.MODIFICATIONS[b.modification]) return [{ json: { early: { ok: false, reason: 'Choose a modification type first' } } }];
   if (b.mode === 'discuss' && !String(b.instruction || '').trim()) return [{ json: { early: { ok: false, reason: 'Write the instruction for the AI first' } } }];
-} else if (!points.trim()) {
+} else if (!para && !points.trim()) {
   return [{ json: { early: { ok: false, reason: 'Add the content points for this section first' } } }];
 }
 
@@ -173,8 +177,10 @@ const run = async (name, fn) => { try { records.push(...(await fn())); } catch (
 // Body sections are sourced from the literature search; abstracts, titles and references are not.
 const queries = revise
   ? [project.question, project.topic, hint, paragraph.slice(0, 200)].map(x => String(x || '').trim()).filter(Boolean).slice(0, 4)
-  : [project.question, project.topic, hint].concat(points.split('\\n')).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
-if (revise ? b.mode === 'cite' : sec.fixed == null) {
+  : para
+    ? [project.question, project.topic, hint, point].map(x => String(x || '').trim()).filter(Boolean).slice(0, 4)
+    : [project.question, project.topic, hint].concat(points.split('\\n')).map(x => String(x || '').trim()).filter(Boolean).slice(0, 4);
+if (revise ? b.mode === 'cite' : (para || sec.fixed == null)) {
   for (const q of queries) {
     await run('openalex', () => OA.searchOpenAlex(q, { yearFrom: null, perPage: 25, mailto: MAILTO }, fetchJson));
     await run('europepmc', () => EPMC.search(q, { yearFrom: null, pageSize: 25 }, fetchJson));
@@ -186,7 +192,10 @@ const filt = F.filterSources(records, { types: ['article', 'review', 'conference
 const kept = filt.kept || [];
 const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';
-const prompt = revise
+const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
+const prompt = para
+  ? P.buildParagraphPrompt({ type, section, point, words, prior: priorParas, hint, sourcesText, style: String(b.style || ''), project, position: Number(b.position) || 1, total: Number(b.total) || 1 })
+  : revise
   ? P.buildRevisePrompt({ type, section, paragraph, previous: String(b.previous || '').slice(0, 6000), mode: b.mode, modification: b.modification, instruction: String(b.instruction || '').slice(0, 1000), sourcesText, style: String(b.style || ''), project })
   : P.buildSectionPrompt({ type, section, words, points, project, prior, sourcesText, hint });
 const budget = revise ? P.countWords(paragraph) : words;

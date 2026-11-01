@@ -110,3 +110,19 @@ test('connect uses the previous paragraph; discuss uses the instruction; cite ad
   assert.match(cite, /about 160 words/);
   assert.match(cite, /\{\{cite:KEY\}\}/);
 });
+
+test('the outline gives one paragraph per content point, with words split evenly', () => {
+  const o = P.outlineOf('Background\nProblem\nAim', 900);
+  assert.equal(o.length, 3);
+  assert.deepEqual(o.map(x => x.point), ['Background', 'Problem', 'Aim']);
+  assert.deepEqual(o.map(x => x.words), [300, 300, 300]);
+  assert.deepEqual(P.outlineOf('', 900), []);
+});
+
+test('a paragraph prompt covers one point and follows the earlier paragraphs', () => {
+  const p = P.buildParagraphPrompt({ type: 'empirical:q1', section: 'introduction', point: 'Cost of care abroad', words: 200, prior: ['First paragraph text.'], position: 2, total: 3 });
+  assert.match(p, /paragraph 2 of 3/);
+  assert.match(p, /covers only this point: Cost of care abroad/);
+  assert.match(p, /First paragraph text/);
+  assert.match(p, /about 200 words/);
+});
