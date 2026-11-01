@@ -21,6 +21,14 @@ function bundle() {
   return parts.join('\n');
 }
 
+// Minimal URLSearchParams for sandboxes that do not provide it (only used to build query strings).
+const SHIM = `
+if (typeof URLSearchParams === 'undefined') {
+  globalThis.URLSearchParams = class { constructor(o) { this.o = Object.assign({}, o || {}); }
+    toString() { return Object.keys(this.o).map(k => encodeURIComponent(k) + '=' + encodeURIComponent(this.o[k])).join('&'); } };
+}
+`;
+
 const RUNNER = `
 // ---- runner ----
 const OA = __req('openalex'), EPMC = __req('europepmc'), DOAJ = __req('doaj'), CORE = __req('core'), GREY = __req('grey');
@@ -42,7 +50,9 @@ if (!question || !queries.length)
 
 const includeGrey = f.includeGrey !== false;
 const yearFrom = f.yearFrom || null;
-const fetchJson = async (url, opts = {}) => $helpers.httpRequest({ method: 'GET', url, headers: opts.headers || {}, json: true });
+// n8n Code nodes expose the HTTP helper as this.helpers (not $helpers) and may lack URLSearchParams.
+const HTTP = (typeof $helpers !== 'undefined' && $helpers) || (this && this.helpers);
+const fetchJson = async (url, opts = {}) => HTTP.httpRequest({ method: 'GET', url, headers: opts.headers || {}, json: true });
 
 const records = [], errors = [];
 const run = async (name, fn) => { try { records.push(...(await fn())); } catch (e) { errors.push(name + ': ' + e.message); } };
@@ -65,7 +75,7 @@ return [{ json: Object.assign({}, result, { searched: records.length, sourceErro
 `;
 
 function workflow() {
-  const code = bundle() + '\n' + RUNNER;
+  const code = SHIM + bundle() + '\n' + RUNNER;
   return {
     name: 'Q1 Literature Review (draft)',
     nodes: [
