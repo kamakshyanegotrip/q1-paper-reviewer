@@ -27,6 +27,7 @@ function buildPrompt(question, kept, opts = {}) {
 
 async function synthesize(question, kept, llm, opts = {}) {
   const keys = kept.map(sourceKey);
+  if (typeof llm !== 'function') return { ok: false, skipped: true, text: '', attempts: 0 };
   const maxAttempts = opts.maxAttempts || 3;
   let prompt = buildPrompt(question, kept, opts);
   let last = null;

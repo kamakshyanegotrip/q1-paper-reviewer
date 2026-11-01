@@ -53,22 +53,19 @@ test('draft workflow: refuses when the key checker does not authorise', async ()
   assert.match(out[0].json.reason, /Not authorised/);
 });
 
-test('draft workflow: end to end with mocked sources keeps trusted grey and cites real keys', async () => {
+test('draft workflow: end to end with mocked sources returns references, skips the AI write-up, no env reads', async () => {
   const calls = [];
   const out = await runNode(goodBody, { ANTHROPIC_API_KEY: 'x', LIT_CONTACT_EMAIL: 'ops@example.org' }, calls);
   const j = out[0].json;
-  assert.equal(j.ok, true, JSON.stringify(j).slice(0, 400));
   assert.ok(calls.some(u => u.includes('api.openalex.org')));
-  assert.ok(calls.some(u => u.includes('api.anthropic.com')));
+  assert.ok(!calls.some(u => u.includes('api.anthropic.com')), 'no AI call without a key path');
+  assert.equal(j.skipped, true);
+  assert.equal(j.ok, false);
   const texts = j.references.map(r => r.text).join(' || ');
   assert.match(texts, /Medical visas and demand/);
   assert.match(texts, /Official report on medical tourism/);
   assert.doesNotMatch(texts, /Unvetted report/);          // untrusted report excluded
   assert.equal(j.style, 'mla');
-  const readable = j.draft.replace(/\{\{cite:([^}]+)\}\}/g, (m, k) => j.labels[k] || 'UNRESOLVED');
-  assert.doesNotMatch(readable, /UNRESOLVED/);
-  assert.match(readable, /\(Lee, 2021\)/);
-  assert.deepEqual(j.unresolvedKeys, []);
 });
 
 test('draft workflow: reports-as-articles from OpenAlex do not bypass the grey gate', async () => {

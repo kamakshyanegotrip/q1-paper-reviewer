@@ -26,7 +26,7 @@ const RUNNER = `
 const OA = __req('openalex'), EPMC = __req('europepmc'), DOAJ = __req('doaj'), CORE = __req('core'), GREY = __req('grey');
 const { runLiteratureReview } = __req('pipeline');
 const MODEL = 'claude-sonnet-5-5';
-const MAILTO = $env.LIT_CONTACT_EMAIL || '';
+const MAILTO = ''; // env vars are blocked in Code nodes on this n8n server
 
 const b = ($input.first().json.body) || $input.first().json;
 const question = String(b.question || '').trim();
@@ -48,18 +48,11 @@ for (const q of queries.slice(0, 8)) {
   await run('openalex', () => OA.searchOpenAlex(q, { yearFrom, perPage: 25, mailto: MAILTO }, fetchJson));
   await run('europepmc', () => EPMC.search(q, { yearFrom, pageSize: 25 }, fetchJson));
   await run('doaj', () => DOAJ.search(q, { yearFrom, pageSize: 25 }, fetchJson));
-  if ($env.CORE_API_KEY) await run('core', () => CORE.search(q, { apiKey: $env.CORE_API_KEY, yearFrom, pageSize: 25 }, fetchJson));
   if (includeGrey) await run('grey', () => GREY.search(q, { yearFrom, perPage: 25, mailto: MAILTO }, fetchJson));
 }
 
-const llm = async (prompt) => {
-  const r = await $helpers.httpRequest({
-    method: 'POST', url: 'https://api.anthropic.com/v1/messages', json: true,
-    headers: { 'x-api-key': $env.ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    body: { model: MODEL, max_tokens: 3000, messages: [{ role: 'user', content: prompt }] }
-  });
-  return (r.content || []).map(c => c.text || '').join('');
-};
+// AI write-up is off until the key can be provided without env vars (see notes).
+const llm = null;
 
 const types = includeGrey ? ['article', 'review', 'conference', 'grey'] : ['article', 'review', 'conference'];
 const result = await runLiteratureReview({

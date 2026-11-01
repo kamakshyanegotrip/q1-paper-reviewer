@@ -26,6 +26,7 @@ async function runLiteratureReview({ question, records, filters, style, llm, max
   }
   return {
     ok: syn.ok,
+    skipped: !!syn.skipped,
     labels,
     style: chosenStyle,
     draft: syn.text,
