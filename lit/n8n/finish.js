@@ -223,11 +223,25 @@ const { validateCitations } = require('./validate');
 
 function sourceKey(s) { return s.doi ? s.doi : ('ty:' + s.title.slice(0, 60)); }
 
+const DEFAULT_LENGTH = '1,200 to 1,800 words';
+const MAX_OUTLINE = 12;
+
+// opts.length: the expected length as the user wrote it (e.g. "2,500 to 3,500 words").
+// opts.outline: optional list of headings or points; when given, one section is written per item, in order.
 function buildPrompt(question, kept, opts = {}) {
   const list = kept.map(s => {
     const who = s.isGrey ? (s.organisation || 'Organisation') : (s.authors || []).map(a => a.family).join(', ');
     return `- key: ${sourceKey(s)} | ${who} (${s.year || 'n.d.'}) | ${s.title} | ${s.tierLabel}${s.foundational ? ' | foundational' : ''}\n  abstract: ${(s.abstract || '').slice(0, 1200) || '(none provided)'}`;
   }).join('\n');
+  const length = (opts.length || '').trim() || DEFAULT_LENGTH;
+  const outline = (opts.outline || []).map(s => String(s).trim()).filter(Boolean).slice(0, MAX_OUTLINE);
+  const structure = outline.length
+    ? [
+        '- Structure: write one section for each heading below, in this order, using the heading as the section title. Keep every section on its own topic.',
+        ...outline.map((h, i) => `  ${i + 1}. ${h}`),
+        '- End with a short "Gaps in the evidence" section.'
+      ]
+    : ['- Structure: organise under headings by theme, with a short gaps section at the end.'];
   return [
     'You are writing a literature review section for an academic paper.',
     `Research question: ${question}`,
@@ -238,7 +252,8 @@ function buildPrompt(question, kept, opts = {}) {
     '- If the sources do not cover a point, say so under a heading "Gaps in the evidence" instead of guessing.',
     '- Do not invent statistics, dates, or policy details.',
     '- Write in formal academic English.',
-    '- Length: about 1,200 to 1,800 words, organised under headings by theme, with a short gaps section at the end.',
+    `- Length: about ${length}.`,
+    ...structure,
     `Sources:\n${list}`
   ].join('\n');
 }
@@ -272,13 +287,13 @@ const { formatReference, resolveStyle } = require('./format');
 const { synthesize, sourceKey, buildPrompt } = require('./synthesis');
 const { validateCitations } = require('./validate');
 
-async function runLiteratureReview({ question, records, filters, style, llm, maxAttempts }) {
+async function runLiteratureReview({ question, records, filters, style, llm, maxAttempts, length, outline }) {
   const chosenStyle = resolveStyle(style);                       // default APA 7
   const { kept, excluded, log } = filterSources(records, filters);
   if (kept.length === 0) {
     return { ok: false, reason: 'No sources passed the filters', log, excluded };
   }
-  const syn = await synthesize(question, kept, llm, { maxAttempts });
+  const syn = await synthesize(question, kept, llm, { maxAttempts, length, outline });
   const references = kept
     .slice()
     .sort((a, b) => String(a.authors && a.authors[0] ? a.authors[0].family : a.organisation || a.title).localeCompare(String(b.authors && b.authors[0] ? b.authors[0].family : b.organisation || b.title)))
@@ -307,13 +322,13 @@ async function runLiteratureReview({ question, records, filters, style, llm, max
 
 // Two-step version for n8n: step 1 searches/filters and builds the prompt; the model call is a
 // separate node (it needs a stored credential); step 2 checks the reply and formats the result.
-function prepareLiterature({ question, records, filters, style }) {
+function prepareLiterature({ question, records, filters, style, length, outline }) {
   const chosenStyle = resolveStyle(style);
   const { kept, excluded, log } = filterSources(records, filters);
   if (kept.length === 0) {
     return { early: { ok: false, reason: 'No sources passed the filters', log, excluded } };
   }
-  return { early: null, prompt: buildPrompt(question, kept), kept, style: chosenStyle, log, excluded };
+  return { early: null, prompt: buildPrompt(question, kept, { length, outline }), kept, style: chosenStyle, log, excluded };
 }
 
 function finishLiterature({ prep, text, error }) {
