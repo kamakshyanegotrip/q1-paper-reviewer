@@ -95,9 +95,9 @@ function workflow() {
       { parameters: { jsCode: code },
         id: 'lit-engine', name: 'Literature engine', type: 'n8n-nodes-base.code', typeVersion: 2, position: [260, 200] },
       // Gemini free tier. Uses the existing Google Gemini (PaLM) API credential, chosen in the node.
-      // Replace MODEL_ID with the model name the review engine uses (see its Create Review ID & Config node).
+      // Model: gemini-2.0-flash-lite (on the Gemini API free tier).
       { parameters: {
-          method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/MODEL_ID:generateContent',
+          method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
           authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
           sendBody: true, specifyBody: 'json',
           jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 3000, temperature: 0.2 } } }}",
