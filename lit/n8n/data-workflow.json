@@ -1,0 +1,151 @@
+{
+  "name": "Q1 Data analysis (relay)",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "q1-data-analysis",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      },
+      "id": "data-webhook",
+      "name": "Data webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        200
+      ],
+      "webhookId": "q1-data-analysis"
+    },
+    {
+      "parameters": {
+        "source": "database",
+        "workflowId": {
+          "__rl": true,
+          "mode": "list",
+          "value": "w062U1R4RCGmqZo9",
+          "cachedResultName": "Q1 Auth - Check Key"
+        },
+        "workflowInputs": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "key": "={{ $('Data webhook').item.json.body.key }}",
+            "review_id": "={{ $('Data webhook').item.json.body.review_id || '' }}"
+          },
+          "matchingColumns": [],
+          "schema": [],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "write-auth",
+      "name": "Call 'Q1 Auth - Check Key'",
+      "type": "n8n-nodes-base.executeWorkflow",
+      "typeVersion": 1.2,
+      "position": [
+        260,
+        200
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://q1-stats:8000/analyze-data",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "spec",
+              "value": "={{ $('Data webhook').item.json.body.spec }}"
+            },
+            {
+              "name": "file",
+              "parameterType": "formBinaryData",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-Q1-Token",
+              "value": "REPLACE_WITH_TOKEN"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 170000
+        }
+      },
+      "id": "data-stats",
+      "name": "Stats service",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        520,
+        200
+      ],
+      "continueOnFail": true
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ $json.error ? { error: 'The statistics service could not run this analysis.' } : $json }}",
+        "options": {}
+      },
+      "id": "data-respond",
+      "name": "Data respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        760,
+        200
+      ]
+    }
+  ],
+  "connections": {
+    "Data webhook": {
+      "main": [
+        [
+          {
+            "node": "Call 'Q1 Auth - Check Key'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Call 'Q1 Auth - Check Key'": {
+      "main": [
+        [
+          {
+            "node": "Stats service",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stats service": {
+      "main": [
+        [
+          {
+            "node": "Data respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "active": false
+}

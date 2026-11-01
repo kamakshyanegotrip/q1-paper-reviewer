@@ -308,6 +308,7 @@
   const W = window.Q1Write;
   const PL = window.Q1Plan;
   const WRITE_PATH = CFG.writePath || '/q1-write-section';
+  const DATA_PATH = CFG.dataPath || '/q1-data-analysis';
   const STYLES = [['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']];
   const MODIFICATIONS = [['argumentative', 'Argumentative'], ['discussion', 'Discussion-based'], ['analytical', 'Analytical'], ['theory', 'Theory-based (aligning theory)']];
   // Paragraphs are separated by a blank line.
@@ -351,10 +352,20 @@
       ${discussBox(sid, 'all')}</div>`;
   }
 
+  // The analysis results: the sentences ready for Results, with the reliabilities and fit shown.
+  function renderDataResults(r) {
+    if (!r || !r.sentences || !r.sentences.length) return '';
+    return `<div style="margin-top:12px;border-top:1px solid #e3dccb;padding-top:10px">
+      <b>Results (check each sentence before you use it)</b>
+      <ul style="font-size:14px;line-height:1.5">${r.sentences.map(x => `<li>${esc(x)}</li>`).join('')}</ul>
+      <button class="btn btn-sm" type="button" id="daInsert">Insert these results into Results</button></div>`;
+  }
+
   function renderWriting() {
     const base = { type: 'empirical:q1', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '', results: '', target: 6000, budgets: {}, points: {} };
     const proj = Object.assign({}, base, store.get('wr:project', {}) || {});
     const drafts = store.get('wr:drafts', {}) || {};
+    const da = store.get('wr:analysis', {}) || {};
     const type = W.REPORT_TYPES[proj.type] ? proj.type : 'empirical:q1';
     const sections = W.REPORT_TYPES[type].sections;
     const outline = PL.buildOutline(type, proj.target, proj.budgets || {});
@@ -405,6 +416,26 @@
           <button class="btn btn-sm" type="submit">Save budgets</button>
           <span class="muted" id="wrOutlineSaved" style="margin-left:8px;font-size:14px"></span>
         </form>
+      </section>
+
+      <section class="card" style="margin-top:16px">
+        <div class="card-head" style="margin-bottom:8px"><h2 style="margin:0">Data analysis</h2><small>upload a dataset, run the analyses, then insert the results into Results</small></div>
+        <p class="muted" style="font-size:14px;margin-top:0">The dataset (CSV, XLSX or SAV) is analysed on the server and is not stored. Only the results are kept in this browser.</p>
+        <label class="field"><span>Dataset</span><input type="file" id="daFile" accept=".csv,.xlsx,.xls,.sav"></label>
+        <label class="field"><span>Constructs <i>one per line: Name: item1, item2, item3</i></span><textarea id="daConstructs" rows="4" placeholder="Service quality: SQ1, SQ2, SQ3&#10;Satisfaction: SAT1, SAT2, SAT3">${esc(da.constructs || '')}</textarea></label>
+        <label class="field"><span>Paths <i>one per line: From -> To</i></span><textarea id="daPaths" rows="2" placeholder="Service quality -> Satisfaction">${esc(da.paths || '')}</textarea></label>
+        <div class="grid two">
+          <label class="field"><span>Method</span><select id="daMethod"><option value="PLS"${da.method !== 'CB' ? ' selected' : ''}>PLS-SEM</option><option value="CB"${da.method === 'CB' ? ' selected' : ''}>CB-SEM (CFA)</option></select></label>
+          <label class="field"><span>Bootstrap resamples</span><input type="number" id="daBoot" min="0" max="1000" value="${esc(da.boot || 200)}"></label>
+        </div>
+        <label class="field"><span>Variables to describe <i>comma-separated column names</i></span><input type="text" id="daDescribe" value="${esc(da.describe || '')}"></label>
+        <div class="grid two">
+          <label class="field"><span>Regression outcome <i>optional</i></span><input type="text" id="daY" value="${esc(da.y || '')}"></label>
+          <label class="field"><span>Regression predictors <i>comma-separated</i></span><input type="text" id="daX" value="${esc(da.x || '')}"></label>
+        </div>
+        <button class="btn btn-primary" type="button" id="daRun">Run analysis</button>
+        <div id="daStatus" class="muted" style="font-size:14px;margin-top:8px" aria-live="polite"></div>
+        <div id="daOut">${renderDataResults(da.results)}</div>
       </section>
 
       <section class="card" style="margin-top:16px">
@@ -473,6 +504,71 @@
       $('#wrOutlineSaved').textContent = 'Budgets saved.';
       renderWriting();
     });
+
+    // Data analysis: the settings are saved as they change, and the dataset is sent to the server only when you run it.
+    const saveDa = patch => { store.set('wr:analysis', Object.assign({}, store.get('wr:analysis', {}) || {}, patch)); };
+    [['daConstructs', 'constructs'], ['daPaths', 'paths'], ['daBoot', 'boot'], ['daDescribe', 'describe'], ['daY', 'y'], ['daX', 'x']].forEach(([id, key]) => {
+      const el = $('#' + id); if (el) el.addEventListener('change', () => saveDa({ [key]: el.value }));
+    });
+    const daMethodEl = $('#daMethod'); if (daMethodEl) daMethodEl.addEventListener('change', () => saveDa({ method: daMethodEl.value }));
+
+    const daStatus = t => { const el = $('#daStatus'); if (el) el.textContent = t; };
+    const parseConstructs = text => String(text || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      const i = l.indexOf(':');
+      return { name: (i < 0 ? l : l.slice(0, i)).trim(), items: (i < 0 ? [] : l.slice(i + 1).split(',')).map(x => x.trim()).filter(Boolean) };
+    }).filter(c => c.name && c.items.length);
+    const parsePaths = text => String(text || '').split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      const [from, to] = l.split('->').map(x => (x || '').trim());
+      return { from, to };
+    }).filter(p => p.from && p.to);
+    const csvList = t => String(t || '').split(',').map(x => x.trim()).filter(Boolean);
+
+    const daRun = $('#daRun');
+    if (daRun) daRun.addEventListener('click', async () => {
+      const file = $('#daFile').files && $('#daFile').files[0];
+      if (!file) { daStatus('Choose a dataset first.'); return; }
+      if (!settings().key) { daStatus('Add your access key in Settings first.'); return; }
+      const constructs = parseConstructs($('#daConstructs').value);
+      const paths = parsePaths($('#daPaths').value);
+      const y = $('#daY').value.trim(), x = csvList($('#daX').value);
+      const spec = {
+        method: $('#daMethod').value,
+        bootstrap: Math.max(0, Math.min(1000, Number($('#daBoot').value) || 200)),
+        constructs, paths,
+        describe: csvList($('#daDescribe').value),
+        regression: y && x.length ? { y, x } : undefined
+      };
+      if (!constructs.length && !spec.describe.length && !spec.regression) { daStatus('Add constructs, variables to describe, or a regression.'); return; }
+      const fd = new FormData();
+      fd.append('key', settings().key);
+      fd.append('file', file, file.name);
+      fd.append('spec', JSON.stringify(spec));
+      daStatus('Running the analysis on the server… this can take a minute with bootstrapping.');
+      daRun.disabled = true;
+      try {
+        const d = await apiJson(await fetch(apiUrl(DATA_PATH), { method: 'POST', body: fd }));
+        saveDa({ constructs: $('#daConstructs').value, paths: $('#daPaths').value, boot: $('#daBoot').value, describe: $('#daDescribe').value, y, x: $('#daX').value, method: spec.method, results: d });
+        $('#daOut').innerHTML = renderDataResults(d);
+        bindInsert();
+        daStatus(d.sentences && d.sentences.length ? 'Analysis finished.' : 'The analysis returned no results. Check the constructs and variable names.');
+      } catch (e) {
+        daStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the data analysis step is not set up on the server.' : 'Could not run the analysis: ' + e.message);
+      } finally { daRun.disabled = false; }
+    });
+
+    function bindInsert() {
+      const btn = $('#daInsert');
+      if (!btn) return;
+      btn.addEventListener('click', () => {
+        const res = (store.get('wr:analysis', {}) || {}).results || {};
+        const cur = store.get('wr:project', proj) || proj;
+        const add = (res.sentences || []).join('\n');
+        store.set('wr:project', Object.assign({}, cur, { results: [cur.results || '', add].filter(Boolean).join('\n') }));
+        renderWriting();
+        daStatus('Results added. Check them in the Results box above.');
+      });
+    }
+    bindInsert();
 
     app.querySelectorAll('textarea[data-points]').forEach(t => t.addEventListener('change', () => {
       const cur = store.get('wr:project', proj) || proj;
