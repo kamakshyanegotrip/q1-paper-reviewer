@@ -100,7 +100,7 @@ function workflow() {
           method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-lite:generateContent',
           authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
           sendBody: true, specifyBody: 'json',
-          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 3000, temperature: 0.2 } } }}",
+          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 8000, temperature: 0.2 } } }}",
           options: {} },
         id: 'lit-gemini', name: 'Gemini draft', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [500, 200], continueOnFail: true },
       { parameters: { jsCode: SHIM + bundle() + '\n' + FINISH },
