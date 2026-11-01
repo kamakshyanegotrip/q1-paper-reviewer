@@ -9,13 +9,18 @@ function sourceKey(s) { return s.doi ? s.doi : ('ty:' + s.title.slice(0, 60)); }
 const DEFAULT_LENGTH = '1,200 to 1,800 words';
 const MAX_OUTLINE = 12;
 
-// opts.length: the expected length as the user wrote it (e.g. "2,500 to 3,500 words").
-// opts.outline: optional list of headings or points; when given, one section is written per item, in order.
-function buildPrompt(question, kept, opts = {}) {
-  const list = kept.map(s => {
+// The kept sources as prompt lines, each with its citation key.
+function sourceList(kept) {
+  return kept.map(s => {
     const who = s.isGrey ? (s.organisation || 'Organisation') : (s.authors || []).map(a => a.family).join(', ');
     return `- key: ${sourceKey(s)} | ${who} (${s.year || 'n.d.'}) | ${s.title} | ${s.tierLabel}${s.foundational ? ' | foundational' : ''}\n  abstract: ${(s.abstract || '').slice(0, 1200) || '(none provided)'}`;
   }).join('\n');
+}
+
+// opts.length: the expected length as the user wrote it (e.g. "2,500 to 3,500 words").
+// opts.outline: optional list of headings or points; when given, one section is written per item, in order.
+function buildPrompt(question, kept, opts = {}) {
+  const list = sourceList(kept);
   const length = (opts.length || '').trim() || DEFAULT_LENGTH;
   const outline = (opts.outline || []).map(s => String(s).trim()).filter(Boolean).slice(0, MAX_OUTLINE);
   const structure = outline.length
@@ -57,4 +62,4 @@ async function synthesize(question, kept, llm, opts = {}) {
   return { ok: false, text: last.text, attempts: maxAttempts, unknownKeys: last.check.unknownKeys, uncited: last.check.uncitedSentences };
 }
 
-module.exports = { buildPrompt, synthesize, sourceKey };
+module.exports = { buildPrompt, synthesize, sourceKey, sourceList };
