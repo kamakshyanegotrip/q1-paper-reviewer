@@ -185,7 +185,33 @@
     return lines.join('\n');
   }
 
-  const api = { buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
+  // The prompt that rewrites the source article into one section of the target format.
+  // The target format's section list is given so the section fits the whole document.
+  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {} }) {
+    const t = T.REPORT_TYPES[type] || { label: 'document', sections: [] };
+    const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '' };
+    const plan = sectionsOf(type).filter(x => x.id !== 'references').map(x => `- ${x.title}${x.fixed != null ? ' (fixed length)' : ''}`).join('\n');
+    const lines = [
+      `You are transforming an existing academic article into a ${t.label.toLowerCase()}.`,
+      `Target section: ${s.title}. Purpose: ${s.brief}`,
+      `Target document structure, in order:\n${plan}`,
+      `Working title: ${project.title || '(keep the source title)'}`,
+      'Rules:',
+      '- Use the source article below as the basis: keep its claims, evidence and figures. Do not invent facts or figures.',
+      '- Re-organise the source material into this section only, as the target structure requires. Material that belongs to another section is left out here.',
+      '- Where the sources listed below are relevant, integrate them and cite each new claim with {{cite:KEY}} using the exact key shown. Keep existing claims that remain valid.',
+      sourcesText ? '' : '- Make no citations; no new sources were provided.',
+      `- Length: about ${words} words (no more than 10% above or below).`,
+      '- Start with the section title as a heading. Separate paragraphs with a blank line.',
+      '- Write in formal academic English.'
+    ];
+    lines.push(`Source article:\n${String(source || '').slice(0, 40000)}`);
+    if (prior.length) lines.push('Sections already transformed (keep consistent with them):\n' + prior.map(p => `## ${p.title}\n${clip(p.text, 2500)}`).join('\n\n'));
+    if (sourcesText) lines.push(`Sources:\n${sourcesText}`);
+    return lines.filter(x => x !== '').join('\n');
+  }
+
+  const api = { buildTransformPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);
