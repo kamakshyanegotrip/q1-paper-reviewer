@@ -90,7 +90,8 @@
 
   const P = {
     validate: CFG.validatePath || '/q1-review-validate', validations: CFG.validationsPath || '/q1-review-validations',
-    finalize: CFG.finalizePath || '/q1-review-finalize', final: CFG.finalPath || '/q1-review-final'
+    finalize: CFG.finalizePath || '/q1-review-finalize', final: CFG.finalPath || '/q1-review-final',
+    implement: CFG.implementPath || '/q1-implement-changes'
   };
   const apiUrl = path => settings().api.replace(/\/$/, '') + path;
   async function apiJson(res) {
@@ -924,6 +925,12 @@
         <select id="fVal" aria-label="Your decision"><option value="">Any validation</option><option value="none">Not yet validated</option>${VAL.map(v => `<option value="${v[0]}">${v[1]}</option>`).join('')}</select>
         <input type="search" id="fQ" placeholder="Search findings…" aria-label="Search">
       </div>
+      <div class="card" style="margin-bottom:16px" id="implBar">
+        <p style="margin:0 0 8px"><b>Implement changes to the paper.</b> Only findings you marked <b>Confirm</b> are used. Each one gets its own button, or use the button below to apply all of them at once. The result is a new revised version; your original file is not overwritten.</p>
+        <button type="button" class="btn btn-sm" id="implAll">Implement all confirmed changes</button>
+        <div class="muted" id="implStatus" style="margin-top:8px;font-size:14px" aria-live="polite"></div>
+        <div id="implResult"></div>
+      </div>
       <div id="findingList"></div>`;
   }
   function wireFindings(list, id, demo) {
@@ -961,7 +968,9 @@
           <div class="validate" role="group" aria-label="Your decision">
             ${VAL.map(x => `<button type="button" class="${x[0]}" data-v="${x[0]}" aria-pressed="${v.v === x[0]}">${x[1]}</button>`).join('')}
             <textarea placeholder="Your note (optional)" data-note>${esc(v.note || '')}</textarea>
-          </div></article>`;
+          </div>
+          ${v.v === 'confirm' ? `<div style="margin-top:8px"><button type="button" class="btn btn-sm" data-impl="${esc(a.id)}">Implement this change</button></div>` : ''}
+          </article>`;
       }).join('') || '<div class="card empty">No findings match these filters.</div>';
       const done = list.filter(a => vals[a.id] && vals[a.id].v).length;
       $('#valProgress').textContent = `${done} of ${list.length} validated.`;
@@ -978,6 +987,33 @@
       if (!e.target.matches('[data-note]')) return;
       const fid = e.target.closest('.finding').dataset.id; vals[fid] = Object.assign(vals[fid] || {}, { note: e.target.value, at: new Date().toISOString() });
       store.set('val:' + id, vals); push();
+    });
+    // ---- implement changes (per finding or all confirmed) ----
+    const implStatus = t => { const el = $('#implStatus'); if (el) el.textContent = t; };
+    const showImplResult = d => {
+      const links = [['doc_url', 'Open revised paper (Google Doc)'], ['docx_url', 'Download revised paper (DOCX)'], ['pdf_url', 'Download revised paper (PDF)']]
+        .filter(x => d[x[0]]).map(x => `<a href="${esc(d[x[0]])}" target="_blank" rel="noopener">${esc(x[1])}</a>`).join(' · ');
+      const applied = arr(d.applied).length, skipped = arr(d.skipped).length;
+      $('#implResult').innerHTML = `<div class="card" style="margin-top:10px"><p style="margin:0 0 6px"><b>Revised version ready.</b> Applied ${applied} change(s)${skipped ? `, skipped ${skipped}` : ''}.</p><p style="margin:0;font-size:14px">${links || 'No file link returned.'}</p></div>`;
+    };
+    const implement = (ids, btn) => {
+      if (!ids.length) { implStatus('Mark at least one finding as Confirm first.'); return; }
+      if (!online) { implStatus('Sign in with your access key in Settings to implement changes.'); return; }
+      if (btn) btn.disabled = true;
+      $('#implAll').disabled = true;
+      $('#implResult').innerHTML = '';
+      implStatus(`Working on ${ids.length} change(s). This can take several minutes; keep this page open.`);
+      apiPostForm(P.implement, { review_id: id, finding_ids: JSON.stringify(ids) })
+        .then(d => { implStatus(''); showImplResult(d); })
+        .catch(e => implStatus(/\(404\)/.test(e.message)
+          ? 'Not connected yet: the implementation workflow is not set up on the server.'
+          : 'Could not implement the changes: ' + e.message))
+        .finally(() => { if (btn) btn.disabled = false; $('#implAll').disabled = false; });
+    };
+    $('#implAll').addEventListener('click', () => implement(list.filter(a => vals[a.id] && vals[a.id].v === 'confirm').map(a => a.id), null));
+    $('#findingList').addEventListener('click', e => {
+      const ib = e.target.closest('button[data-impl]'); if (!ib) return;
+      implement([ib.dataset.impl], ib);
     });
     draw();
     if (online) {

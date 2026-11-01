@@ -7,6 +7,7 @@ window.Q1_CONFIG = {
   journalFinderPath: '/q1-journal-finder',
   journalLookupPath: '/q1-journal-lookup',
   literaturePath: '/q1-literature-run',
+  implementPath: '/q1-implement-changes',
   pollSeconds: 12,
   maxFileMB: 15
 };
