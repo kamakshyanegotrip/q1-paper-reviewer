@@ -1403,6 +1403,11 @@
   }
   function renderLitResult(d) {
     const box = $('#litResult');
+    if (d.skipped && Array.isArray(d.references) && d.references.length) {
+      box.innerHTML = `<h3 style="margin-top:18px">Sources found</h3><p class="muted" style="font-size:14px">The AI written draft is not connected on the server yet, so only the sources and reference list are shown. ${d.references.length} source(s) passed the filters.</p>` +
+        `<ol style="font-size:14px;line-height:1.5">${d.references.map(r => `<li>${esc(r.text)}</li>`).join('')}</ol>`;
+      return;
+    }
     if (!d.ok) { box.innerHTML = `<p class="form-error">${esc(d.reason || d.error || 'No literature review was produced.')}</p>`; return; }
     const labels = d.labels || {};
     const body = String(d.draft || '').replace(/\{\{cite:([^}]+)\}\}/g, (m, k) => ' (' + esc(labels[k] || k) + ')');
