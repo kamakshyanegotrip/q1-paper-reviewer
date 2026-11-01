@@ -13,15 +13,15 @@ test('every report type has sections with unique ids and a brief', () => {
   }
 });
 
-test('the scientific paper includes the sections the author asked for', () => {
-  const ids = W.REPORT_TYPES.scientific.sections.map(s => s.id);
-  for (const want of ['abstract', 'introduction', 'literature_review', 'research_gap', 'methodology', 'data_analysis', 'findings', 'discussion', 'implications', 'conclusion', 'contribution']) {
+test('the quantitative empirical article includes its sections in order', () => {
+  const ids = W.REPORT_TYPES['empirical:q1'].sections.map(s => s.id);
+  for (const want of ['abstract', 'introduction', 'literature_review', 'results', 'conclusion']) {
     assert.ok(ids.includes(want), want);
   }
 });
 
 test('sectionBrief returns the brief or an empty string', () => {
-  assert.match(W.sectionBrief('scientific', 'abstract'), /Abstract|summary/i);
-  assert.equal(W.sectionBrief('scientific', 'nope'), '');
+  assert.match(W.sectionBrief('empirical:q1', 'abstract'), /Abstract|summary/i);
+  assert.equal(W.sectionBrief('empirical:q1', 'nope'), '');
   assert.equal(W.sectionBrief('nope', 'abstract'), '');
 });

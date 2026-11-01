@@ -306,95 +306,292 @@
 
   // ---------- Writing from scratch (separate from the review tabs) ----------
   const W = window.Q1Write;
+  const PL = window.Q1Plan;
   const WRITE_PATH = CFG.writePath || '/q1-write-section';
+  const STYLES = [['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']];
+  const MODIFICATIONS = [['argumentative', 'Argumentative'], ['discussion', 'Discussion-based'], ['analytical', 'Analytical'], ['theory', 'Theory-based (aligning theory)']];
+  // Paragraphs are separated by a blank line.
+  const paraList = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+  const STATE_TAG = {
+    drafted: ['ok', 'drafted'], ready: ['', 'ready to write'], needs_input: ['warn', 'needs input'], locked: ['', 'locked'], missing: ['', 'unknown']
+  };
+
+  // The modification-type choice and the actions for a paragraph or a whole section.
+  const modSelect = () => `<select data-mtype style="font-size:13px"><option value="">Modification type…</option>${MODIFICATIONS.map(m => `<option value="${m[0]}">${m[1]}</option>`).join('')}</select>`;
+  const actionButtons = (sid, idx, first) => `<button class="btn btn-sm" type="button" data-revise="connect" data-sec-id="${esc(sid)}" data-idx="${idx}"${first ? ' disabled title="The first paragraph has no previous paragraph to connect to"' : ''}>Modify to suit previous paragraph</button>
+      <button class="btn btn-sm" type="button" data-discuss-toggle="${esc(sid)}:${idx}">Modify by AI discussion</button>
+      <button class="btn btn-sm" type="button" data-revise="cite" data-sec-id="${esc(sid)}" data-idx="${idx}">Add content and literature</button>`;
+  const discussBox = (sid, idx) => `<div data-discuss-box="${esc(sid)}:${idx}" hidden style="margin-top:6px"><textarea rows="2" data-instr="${esc(sid)}:${idx}" placeholder="What should change? e.g. argue that the cost barrier is overstated" style="width:100%"></textarea><button class="btn btn-sm" type="button" data-revise="discuss" data-sec-id="${esc(sid)}" data-idx="${idx}" style="margin-top:4px">Run the change</button></div>`;
+  function renderParas(sid, text) {
+    return paraList(text).map((p, j) => `
+      <div class="para" style="border-left:3px solid #d9d2c3;padding-left:10px;margin:10px 0">
+        <textarea rows="4" data-para="${esc(sid)}" data-idx="${j}" style="width:100%">${esc(p)}</textarea>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-top:6px">${modSelect()} ${actionButtons(sid, j, j === 0)}</div>
+        ${discussBox(sid, j)}
+      </div>`).join('');
+  }
+  // Same actions on the whole section, for changes that span paragraphs.
+  function sectionTools(sid) {
+    return `<div style="border-top:1px dashed #d9d2c3;padding-top:8px;margin-top:8px">
+      <div style="font-size:13px;margin-bottom:6px"><b>Whole section</b></div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">${modSelect()}
+        <button class="btn btn-sm" type="button" data-discuss-toggle="${esc(sid)}:all">Modify by AI discussion</button>
+        <button class="btn btn-sm" type="button" data-revise="cite" data-sec-id="${esc(sid)}" data-idx="all">Add content and literature</button></div>
+      ${discussBox(sid, 'all')}</div>`;
+  }
+
   function renderWriting() {
-    const proj = Object.assign({ type: 'scientific', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '' }, store.get('wr:project', {}) || {});
+    const base = { type: 'empirical:q1', style: 'apa7', title: '', topic: '', question: '', aims: '', notes: '', results: '', target: 6000, budgets: {}, points: {} };
+    const proj = Object.assign({}, base, store.get('wr:project', {}) || {});
     const drafts = store.get('wr:drafts', {}) || {};
-    const type = W.REPORT_TYPES[proj.type] ? proj.type : 'scientific';
+    const type = W.REPORT_TYPES[proj.type] ? proj.type : 'empirical:q1';
     const sections = W.REPORT_TYPES[type].sections;
+    const outline = PL.buildOutline(type, proj.target, proj.budgets || {});
+    const defaults = PL.buildOutline(type, proj.target, {});
+    const words = id => (outline.sections.find(x => x.id === id) || { words: 0 }).words;
+    const statusOf = id => PL.sectionStatus(type, id, proj, drafts, proj.points || {});
     const field = (name, label, value, hint, rows) => `<label class="field"><span>${label}${hint ? ` <i>${hint}</i>` : ''}</span>${rows ? `<textarea name="${name}" rows="${rows}">${esc(value)}</textarea>` : `<input type="text" name="${name}" value="${esc(value)}">`}</label>`;
+    const typeOptions = Object.keys(W.REPORT_TYPES).map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(W.REPORT_TYPES[k].label)}</option>`).join('');
+    const styleOptions = STYLES.map(o => `<option value="${o[0]}"${o[0] === proj.style ? ' selected' : ''}>${o[1]}</option>`).join('');
+    const body = sections.filter(s => s.id !== 'references');
+    const allRefs = [];
+    Object.values(drafts).forEach(d => (d.references || []).forEach(r => { if (!allRefs.some(x => x.key === r.key)) allRefs.push(r); }));
+
     app.innerHTML = `
       <section class="card">
         <div class="card-head" style="margin-bottom:6px"><h1 style="margin:0">Writing from scratch</h1><small>separate from review results</small></div>
-        <p class="muted" style="margin-top:0">Write a new paper, proposal or chapter from your own topic. Sources are searched and cited the same way as the literature review. Nothing here comes from a review.</p>
+        <p class="muted" style="margin-top:0">Write a new paper, proposal, chapter or book from your own topic. Each section unlocks when the sections it depends on are written and it has its content points and the data it needs. Sources are searched and cited the same way as the literature review.</p>
         ${settings().key ? '' : '<div class="keywarn">Add your access key in <a href="#" id="wrKey">Settings</a> first.</div>'}
         <form id="wrForm" novalidate>
           <div class="grid-2">
-            <label class="field"><span>Report type</span><select name="type">${Object.keys(W.REPORT_TYPES).map(k => `<option value="${k}"${k === type ? ' selected' : ''}>${esc(W.REPORT_TYPES[k].label)}</option>`).join('')}</select></label>
-            <label class="field"><span>Citation style</span><select name="style">${[['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']].map(o => `<option value="${o[0]}"${o[0] === proj.style ? ' selected' : ''}>${o[1]}</option>`).join('')}</select></label>
+            <label class="field"><span>Report type</span><select name="type">${typeOptions}</select></label>
+            <label class="field"><span>Citation style</span><select name="style">${styleOptions}</select></label>
+            <label class="field"><span>Total length (words)</span><input type="number" name="target" min="300" max="60000" step="100" value="${esc(proj.target)}"></label>
           </div>
           ${field('title', 'Working title', proj.title)}
-          ${field('topic', 'Topic and context', proj.topic, 'what the study is about', 3)}
-          ${field('question', 'Research question', proj.question, 'main question', 2)}
+          ${field('topic', 'Topic and context', proj.topic, 'required', 3)}
+          ${field('question', 'Research question', proj.question, 'required', 2)}
           ${field('aims', 'Aims or objectives', proj.aims, 'optional', 2)}
-          ${field('notes', 'Data, method and other notes', proj.notes, 'optional: sample, design, tools, dates', 3)}
+          ${field('notes', 'Data, method and other notes', proj.notes, 'needed for Methodology: sample, design, tools, dates', 3)}
+          ${field('results', 'Results or data', proj.results, 'needed for Findings and Data analysis: figures, tables, key findings', 4)}
           <button class="btn btn-primary" type="submit">Save project details</button>
           <span class="muted" id="wrSaved" style="margin-left:8px;font-size:14px"></span>
         </form>
       </section>
+
       <section class="card" style="margin-top:16px">
-        <div class="card-head" style="margin-bottom:8px"><h2 style="margin:0">Sections: ${esc(W.REPORT_TYPES[type].label)}</h2><button class="btn btn-ghost btn-sm" id="wrAll" type="button">Write all sections in order</button></div>
-        <p class="muted" style="font-size:14px;margin-top:0">Each section is written after the ones above it, so they stay consistent. You can edit any draft before you go on.</p>
+        <div class="card-head" style="margin-bottom:8px"><h2 style="margin:0">Outline and word budgets</h2><small>${esc(W.REPORT_TYPES[type].label)}</small></div>
+        <p class="muted" style="font-size:14px;margin-top:0">The total is split across the sections by their weight. Change any budget, then save. Budgets for abstracts and other fixed parts stay as they are.</p>
+        <form id="wrOutline">
+          <div style="display:grid;grid-template-columns:1fr 110px 1fr;gap:6px 12px;align-items:center;font-size:14px">
+            <b>Section</b><b>Words</b><b>Waits for</b>
+            ${outline.sections.map(s => `
+              <span>${esc(s.title)}${s.fixed ? ' <i class="muted">(fixed)</i>' : ''}</span>
+              <input type="number" name="b_${esc(s.id)}" min="0" step="10" value="${s.words}" ${s.fixed ? 'disabled' : ''}>
+              <span class="muted">${s.dependsOn.length ? s.dependsOn.map(d => esc((sections.find(x => x.id === d) || { title: d }).title)).join(', ') : 'nothing'}</span>`).join('')}
+          </div>
+          <p style="font-size:14px;margin:12px 0 6px"><b>Total: ${outline.total.toLocaleString('en-IN')} words</b> for a target of ${Number(proj.target).toLocaleString('en-IN')} ${outline.withinTolerance ? '<span class="tag ok">on target</span>' : '<span class="tag warn">more than 10% away from the target</span>'}</p>
+          <button class="btn btn-sm" type="submit">Save budgets</button>
+          <span class="muted" id="wrOutlineSaved" style="margin-left:8px;font-size:14px"></span>
+        </form>
+      </section>
+
+      <section class="card" style="margin-top:16px">
+        <div class="card-head" style="margin-bottom:8px"><h2 style="margin:0">Sections</h2><button class="btn btn-ghost btn-sm" id="wrAll" type="button">Write every ready section</button></div>
+        <p class="muted" style="font-size:14px;margin-top:0">A section can be written only when it is ready: its content points are filled in, the data it needs is saved, and the sections it waits for are written.</p>
         <div id="wrStatus" class="muted" style="font-size:14px;margin-bottom:10px" aria-live="polite"></div>
-        ${sections.map((s, i) => `
+        ${body.map((s, i) => {
+          const st = statusOf(s.id);
+          const d = drafts[s.id] || {};
+          const [cls, label] = STATE_TAG[st.state] || STATE_TAG.missing;
+          const counted = d.text ? PL.lengthCheck(d.text, words(s.id)) : null;
+          const waits = st.blockedBy.length ? `<p class="muted" style="font-size:14px;margin:4px 0">Waits for: ${st.blockedBy.map(esc).join(', ')}</p>` : '';
+          const needs = st.missing.length && st.state === 'needs_input' ? `<p style="font-size:14px;margin:4px 0;color:#9a4b00">Still needed: ${st.missing.map(esc).join('; ')}</p>` : '';
+          return `
           <article class="finding" data-sec="${esc(s.id)}" style="margin-bottom:12px">
-            <div class="finding-top"><span class="id">${i + 1}</span><b>${esc(s.title)}</b>${drafts[s.id] && drafts[s.id].text ? '<span class="tag ok">drafted</span>' : '<span class="tag">not yet</span>'}</div>
+            <div class="finding-top"><span class="id">${i + 1}</span><b>${esc(s.title)}</b><span class="tag ${cls}">${label}</span><span class="muted" style="font-size:13px">${words(s.id)} words planned</span></div>
             <p class="muted" style="font-size:14px;margin:4px 0 8px">${esc(s.brief)}</p>
-            <button class="btn btn-sm" type="button" data-write="${esc(s.id)}">${drafts[s.id] && drafts[s.id].text ? 'Write again' : 'Write this section'}</button>
-            <div data-out="${esc(s.id)}">${drafts[s.id] && drafts[s.id].text ? `<textarea rows="8" data-edit="${esc(s.id)}" style="width:100%;margin-top:10px">${esc(drafts[s.id].text)}</textarea>` : ''}</div>
-          </article>`).join('')}
+            ${waits}${needs}
+            <button class="btn btn-ghost btn-sm" type="button" data-hint-toggle="${esc(s.id)}" aria-expanded="false">+ Hint for this section</button>
+            <div data-hint-box="${esc(s.id)}" hidden style="margin:8px 0">
+              <label class="field"><span>Hint <i>a topic or angle; the literature and the text are framed around it, e.g. “causes of bone marrow disease”</i></span><textarea rows="2" data-hint="${esc(s.id)}">${esc((proj.hints || {})[s.id] || '')}</textarea></label>
+            </div>
+            <label class="field"><span>Content points for this section <i>one per line</i></span><textarea rows="3" data-points="${esc(s.id)}">${esc((proj.points || {})[s.id] || '')}</textarea></label>
+            <button class="btn btn-sm" type="button" data-write="${esc(s.id)}" ${st.state === 'ready' || st.state === 'drafted' ? '' : 'disabled'}>${d.text ? 'Write again' : 'Write this section'}</button>
+            ${counted ? `<span class="muted" style="font-size:13px;margin-left:8px">${counted.count} of ${counted.words} words ${counted.ok ? '' : '(outside 10%)'}</span>` : ''}
+            <div data-out="${esc(s.id)}">${d.text ? renderParas(s.id, d.text) : ''}</div>
+            ${d.text ? sectionTools(s.id) : ''}
+          </article>`;
+        }).join('')}
+        ${sections.some(s => s.id === 'references') ? `
+          <article class="finding" style="margin-bottom:12px">
+            <div class="finding-top"><b>References</b><span class="tag">${allRefs.length ? 'built from the drafts' : 'after the drafts'}</span></div>
+            <p class="muted" style="font-size:14px;margin:4px 0">Built from the sources cited in the written sections.</p>
+            ${allRefs.length ? `<ol style="font-size:14px;line-height:1.5">${allRefs.map(r => `<li>${esc(r.text)}</li>`).join('')}</ol>` : ''}
+          </article>` : ''}
       </section>`;
 
     $('#wrForm').addEventListener('submit', e => {
       e.preventDefault();
       const f = new FormData(e.target);
-      const next = { type: f.get('type'), style: f.get('style'), title: f.get('title') || '', topic: f.get('topic') || '', question: f.get('question') || '', aims: f.get('aims') || '', notes: f.get('notes') || '' };
+      const prev = store.get('wr:project', {}) || {};
+      const next = Object.assign({}, prev, {
+        type: f.get('type'), style: f.get('style'), target: Math.max(300, Number(f.get('target')) || 6000),
+        title: f.get('title') || '', topic: f.get('topic') || '', question: f.get('question') || '', aims: f.get('aims') || '', notes: f.get('notes') || '', results: f.get('results') || ''
+      });
       store.set('wr:project', next);
       $('#wrSaved').textContent = 'Saved in this browser.';
-      if (next.type !== type) renderWriting();
+      renderWriting();
     });
     const wrKey = $('#wrKey'); if (wrKey) wrKey.addEventListener('click', e => { e.preventDefault(); openSettings(); });
 
-    const setStatus = t => { const el = $('#wrStatus'); if (el) el.textContent = t; };
-    const sectionIndex = id => sections.findIndex(s => s.id === id);
-
-    // Writes one section, passing the drafts written before it so the sections stay consistent.
-    const writeOne = async (id, btn) => {
-      const i = sectionIndex(id);
+    $('#wrOutline').addEventListener('submit', e => {
+      e.preventDefault();
+      const f = new FormData(e.target);
       const cur = store.get('wr:project', proj) || proj;
-      const prior = sections.slice(0, i).map(s => ({ title: s.title, text: ((store.get('wr:drafts', {}) || {})[s.id] || {}).text || '' })).filter(p => p.text);
-      const body = { type, section: id, brief: W.sectionBrief(type, id), project: JSON.stringify(cur), prior: JSON.stringify(prior) };
-      setStatus(`Writing “${sections[i].title}”… this can take up to a minute.`);
+      const budgets = {};
+      outline.sections.forEach(s => {
+        if (s.fixed) return;
+        const v = Number(f.get('b_' + s.id));
+        if (!Number.isFinite(v)) return;
+        const dflt = (defaults.sections.find(x => x.id === s.id) || {}).words;
+        if (v !== dflt) budgets[s.id] = Math.max(0, Math.round(v));
+      });
+      store.set('wr:project', Object.assign({}, cur, { budgets }));
+      $('#wrOutlineSaved').textContent = 'Budgets saved.';
+      renderWriting();
+    });
+
+    app.querySelectorAll('textarea[data-points]').forEach(t => t.addEventListener('change', () => {
+      const cur = store.get('wr:project', proj) || proj;
+      const points = Object.assign({}, cur.points || {}, { [t.dataset.points]: t.value });
+      store.set('wr:project', Object.assign({}, cur, { points }));
+      renderWriting();
+    }));
+
+    const setStatus = t => { const el = $('#wrStatus'); if (el) el.textContent = t; };
+
+    // Writes one section. It is refused unless the section is ready, so the gating holds even if the page is stale.
+    const writeOne = async (id, btn) => {
+      const cur = store.get('wr:project', proj) || proj;
+      const d0 = store.get('wr:drafts', {}) || {};
+      const st = PL.sectionStatus(type, id, cur, d0, cur.points || {});
+      const title = (sections.find(x => x.id === id) || { title: id }).title;
+      if (st.state !== 'ready' && st.state !== 'drafted') { setStatus(`“${title}” is not ready: ${st.blockedBy.length ? 'waiting for ' + st.blockedBy.join(', ') : st.missing.join('; ')}.`); return false; }
+      const outNow = PL.buildOutline(type, cur.target, cur.budgets || {});
+      const planned = (outNow.sections.find(x => x.id === id) || { words: 0 }).words;
+      const idx = sections.findIndex(s => s.id === id);
+      const prior = sections.slice(0, idx).filter(s => d0[s.id] && d0[s.id].text).map(s => ({ title: s.title, text: d0[s.id].text }));
+      const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
+      const bodyParams = { type, section: id, words: planned, points: (cur.points || {})[id] || '', hint: (cur.hints || {})[id] || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior) };
+      setStatus(`Writing “${title}” (about ${planned} words)… this can take up to a minute.`);
       if (btn) btn.disabled = true;
       try {
-        const d = await apiPostForm(WRITE_PATH, body);
+        const d = await apiPostForm(WRITE_PATH, bodyParams);
         if (!d.ok) throw new Error(d.reason || 'The section could not be written.');
         const all = store.get('wr:drafts', {}) || {};
-        all[id] = { text: d.text || '', labels: d.labels || {}, references: d.references || [], at: new Date().toISOString() };
+        all[id] = { text: d.text || '', labels: d.labels || {}, references: d.references || [], words: planned, at: new Date().toISOString() };
         store.set('wr:drafts', all);
-        setStatus(`“${sections[i].title}” written.`);
+        const check = PL.lengthCheck(d.text || '', planned);
+        setStatus(`“${title}” written: ${check.count} words against ${planned} planned${check.ok ? '.' : ' (outside 10%: edit it or change the budget).'}${d.warning ? ' Check: ' + d.warning : ''}`);
         return true;
       } catch (e) {
-        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the section writer is not set up on the server.' : `Could not write “${sections[i].title}”: ${e.message}`);
+        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the section writer is not set up on the server.' : `Could not write “${title}”: ${e.message}`);
         return false;
       } finally { if (btn) btn.disabled = false; }
     };
+
     app.querySelectorAll('button[data-write]').forEach(b => b.addEventListener('click', async () => {
       if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
       const ok = await writeOne(b.dataset.write, b);
       if (ok) renderWriting();
     }));
+
+    // Writes ready sections one after another. Each finished section can unlock the next.
     $('#wrAll').addEventListener('click', async e => {
       if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
       e.target.disabled = true;
-      for (const s of sections) { const ok = await writeOne(s.id, null); if (!ok) break; }
+      for (let guard = 0; guard < 20; guard++) {
+        const cur = store.get('wr:project', proj) || proj, d0 = store.get('wr:drafts', {}) || {};
+        const next = sections.find(s => s.id !== 'references' && PL.sectionStatus(type, s.id, cur, d0, cur.points || {}).state === 'ready');
+        if (!next) break;
+        const ok = await writeOne(next.id, null);
+        if (!ok) break;
+      }
       e.target.disabled = false;
       renderWriting();
     });
-    app.querySelectorAll('textarea[data-edit]').forEach(t => t.addEventListener('change', () => {
+
+    // Hint: opens the section's hint field and saves what is typed.
+    app.querySelectorAll('button[data-hint-toggle]').forEach(b => b.addEventListener('click', () => {
+      const box = app.querySelector(`[data-hint-box="${b.dataset.hintToggle}"]`);
+      const open = box.hidden; box.hidden = !open; b.setAttribute('aria-expanded', String(open));
+    }));
+    app.querySelectorAll('textarea[data-hint]').forEach(t => t.addEventListener('change', () => {
+      const cur = store.get('wr:project', proj) || proj;
+      store.set('wr:project', Object.assign({}, cur, { hints: Object.assign({}, cur.hints || {}, { [t.dataset.hint]: t.value }) }));
+    }));
+
+    // Paragraph edits by hand: the draft is rebuilt from its paragraphs.
+    app.querySelectorAll('textarea[data-para]').forEach(t => t.addEventListener('change', () => {
+      const sid = t.dataset.para, idx = Number(t.dataset.idx);
       const all = store.get('wr:drafts', {}) || {};
-      all[t.dataset.edit] = Object.assign({}, all[t.dataset.edit] || {}, { text: t.value, at: new Date().toISOString() });
+      const paras = paraList((all[sid] || {}).text || '');
+      paras[idx] = t.value.trim();
+      all[sid] = Object.assign({}, all[sid] || {}, { text: paras.filter(Boolean).join('\n\n'), at: new Date().toISOString() });
       store.set('wr:drafts', all);
+      renderWriting();
+    }));
+
+    app.querySelectorAll('button[data-discuss-toggle]').forEach(b => b.addEventListener('click', () => {
+      const box = app.querySelector(`[data-discuss-box="${b.dataset.discussToggle}"]`);
+      box.hidden = !box.hidden;
+    }));
+
+    // Revision: rewrites one paragraph (or the whole section) with the chosen mode and modification type.
+    const runRevise = async (sid, idx, mode, instruction, scope) => {
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      const block = scope || app;
+      const mtype = block.querySelector('[data-mtype]') ? block.querySelector('[data-mtype]').value : '';
+      if (!mtype) { setStatus('Choose a modification type first.'); return; }
+      const cur = store.get('wr:project', proj) || proj;
+      const d0 = store.get('wr:drafts', {}) || {};
+      const draft = (d0[sid] || {}).text || '';
+      const paras = paraList(draft);
+      const whole = idx === 'all';
+      const paragraph = whole ? draft : paras[Number(idx)];
+      if (!paragraph) { setStatus('That paragraph is empty.'); return; }
+      const title = (sections.find(x => x.id === sid) || { title: sid }).title;
+      const idxSec = sections.findIndex(x => x.id === sid);
+      const prior = sections.slice(0, idxSec).filter(x => d0[x.id] && d0[x.id].text).map(x => ({ title: x.title, text: d0[x.id].text }));
+      const project = { title: cur.title, topic: cur.topic, question: cur.question, aims: cur.aims, notes: cur.notes, results: cur.results };
+      const body = { action: 'revise', type, section: sid, mode, modification: mtype, paragraph, previous: whole || Number(idx) === 0 ? '' : paras[Number(idx) - 1], instruction: instruction || '', style: cur.style, project: JSON.stringify(project), prior: JSON.stringify(prior), hint: (cur.hints || {})[sid] || '', words: PL.countWords(paragraph) };
+      setStatus(`Revising a paragraph of “${title}”… this can take up to a minute.`);
+      try {
+        const d = await apiPostForm(WRITE_PATH, body);
+        if (!d.ok) throw new Error(d.reason || 'The paragraph could not be revised.');
+        const all = store.get('wr:drafts', {}) || {};
+        const old = all[sid] || {};
+        const text = whole ? d.text : paras.map((x, j) => (j === Number(idx) ? d.text : x)).join('\n\n');
+        const refs = (old.references || []).concat((d.references || []).filter(r => !(old.references || []).some(o => o.text === r.text)));
+        all[sid] = Object.assign({}, old, { text, labels: Object.assign({}, old.labels || {}, d.labels || {}), references: refs, at: new Date().toISOString() });
+        store.set('wr:drafts', all);
+        setStatus(`Revised a paragraph of “${title}”${d.warning ? '. Check: ' + d.warning : '.'}`);
+        renderWriting();
+      } catch (e) {
+        setStatus(/\(404\)/.test(e.message) ? 'Not connected yet: the revision step is not set up on the server.' : `Could not revise: ${e.message}`);
+      }
+    };
+    app.querySelectorAll('button[data-revise]').forEach(b => b.addEventListener('click', () => {
+      const block = b.closest('.para') || b.closest('[data-sec]') || app;
+      const mode = b.dataset.revise;
+      const sid = b.dataset.secId, idx = b.dataset.idx;
+      if (mode === 'discuss') {
+        const instr = app.querySelector(`[data-instr="${sid}:${idx}"]`);
+        if (!instr || !instr.value.trim()) { setStatus('Write what should change first.'); return; }
+        return runRevise(sid, idx, 'discuss', instr.value.trim(), block);
+      }
+      runRevise(sid, idx, mode, '', block);
     }));
   }
 
