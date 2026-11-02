@@ -802,6 +802,71 @@
     throw new Error('Unsupported file. Upload a .docx, .pdf or .txt file.');
   }
 
+  // ---------- Word output: markdown from the writer turned into styled HTML, styled per target format ----------
+  const FORMAT_STYLE = {
+    // Books: chapters start on a new page, 1.5 line spacing.
+    book: {
+      body: 'font-family:"Times New Roman",serif;font-size:12pt;line-height:1.5',
+      h1: 'text-align:center;font-size:18pt;font-weight:bold;margin:0 0 18pt;page-break-before:always',
+      h2: 'font-size:14pt;font-weight:bold;margin:18pt 0 6pt',
+      h3: 'font-size:12pt;font-weight:bold;font-style:italic;margin:12pt 0 4pt',
+      p: 'text-align:justify;margin:0 0 10pt;text-indent:0.5in'
+    },
+    // Journal articles, reviews, case studies and theses: APA-style layout, double spaced.
+    article: {
+      body: 'font-family:"Times New Roman",serif;font-size:12pt;line-height:2',
+      h1: 'text-align:center;font-size:14pt;font-weight:bold;margin:0 0 12pt',
+      h2: 'font-size:12pt;font-weight:bold;margin:12pt 0 0;text-align:left',
+      h3: 'font-size:12pt;font-weight:bold;font-style:italic;margin:0;text-align:left',
+      p: 'text-align:left;margin:0;text-indent:0.5in'
+    }
+  };
+  function mdInline(s) {
+    return esc(s).replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\*([^*\n]+)\*/g, '<i>$1</i>');
+  }
+  function mdToHtml(text, style) {
+    const out = [];
+    let inList = false;
+    for (const raw of String(text || '').split('\n')) {
+      const line = raw.trim();
+      if (!line) { if (inList) { out.push('</ul>'); inList = false; } continue; }
+      const h = line.match(/^(#{1,3})\s+(.*)$/);
+      if (h) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        const lvl = h[1].length;
+        out.push(`<h${lvl} style="${style['h' + lvl]}">${mdInline(h[2].replace(/^\*+|\*+$/g, ''))}</h${lvl}>`);
+        continue;
+      }
+      const li = line.match(/^[-*]\s+(.*)$/);
+      if (li) { if (!inList) { out.push('<ul>'); inList = true; } out.push(`<li>${mdInline(li[1])}</li>`); continue; }
+      if (inList) { out.push('</ul>'); inList = false; }
+      out.push(`<p style="${style.p}">${mdInline(line)}</p>`);
+    }
+    if (inList) out.push('</ul>');
+    return out.join('\n');
+  }
+  function buildWordHtml(cur, secs) {
+    const type = (window.Q1Write && window.Q1Write.REPORT_TYPES[cur.type || 'empirical:q1']) || { label: 'Document', family: 'empirical' };
+    const style = type.family === 'book' ? FORMAT_STYLE.book : FORMAT_STYLE.article;
+    const title = String(cur.title || '').trim() || type.label;
+    const refs = [];
+    const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
+      const sec = cur.sections[s.id];
+      (sec.references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
+      const firstLine = String(sec.text).trim().split('\n')[0] || '';
+      const hasHeading = /^#{1,3}\s/.test(firstLine);
+      const lead = hasHeading ? '' : (type.family === 'book'
+        ? `<h1 style="${style.h1}">${esc(s.title)}</h1>`
+        : `<h2 style="${style.h2}">${esc(s.title)}</h2>`);
+      return lead + mdToHtml(sec.text, style);
+    }).join('\n');
+    const titlePage = `<p style="text-align:center;font-size:20pt;font-weight:bold;margin-top:120pt">${esc(title)}</p><p style="text-align:center;margin-top:12pt">${esc(type.label)}</p>`;
+    const refsHtml = refs.length
+      ? `<h1 style="${style.h2}">References</h1>` + refs.map(r => `<p style="margin:0 0 6pt 0.5in;text-indent:-0.5in">${mdInline(r)}</p>`).join('')
+      : '';
+    return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{${style.body}}</style></head><body>${titlePage}${body}${refsHtml}</body></html>`;
+  }
+
   function renderTransform() {
     const W2 = window.Q1Write, PL2 = window.Q1Plan;
     const job = store.get(TR_KEY, {}) || {};
@@ -906,12 +971,25 @@
       for (const s of sectionsList) {
         setStatus(`Transforming “${s.title}”… this can take up to a minute.`);
         try {
-          const params = { action: 'transform', type: t, section: s.id, words: outlineNow.sections.find(x => x.id === s.id).words, source: cur.source, works: JSON.stringify(chosen), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior) };
-          const d = await apiPostForm(WRITE_PATH, params);
-          if (!d.ok) throw new Error(d.reason || 'The section could not be transformed.');
-          out[s.id] = { text: d.text || '', references: d.references || [] };
-          saveJob({ sections: out });
-          prior.push({ title: s.title, text: d.text || '' });
+          // One section can need several calls: the model often stops short, so keep asking for the missing words.
+          const planned = outlineNow.sections.find(x => x.id === s.id).words;
+          const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
+          let text = '', refs = [];
+          for (let attempt = 0; attempt < 6; attempt++) {
+            const have = wordCount(text);
+            if (attempt > 0 && have >= planned * 0.85) break;
+            const need = attempt === 0 ? planned : Math.max(300, planned - have);
+            setStatus(`Transforming “${s.title}”: ${have} of ${planned} words so far…`);
+            const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(chosen), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing: text };
+            const d = await apiPostForm(WRITE_PATH, params);
+            if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be transformed.'); break; }
+            if (!String(d.text || '').trim()) break;
+            text = attempt === 0 ? d.text : text + '\n\n' + d.text;
+            (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
+            out[s.id] = { text, references: refs };
+            saveJob({ sections: out });
+          }
+          prior.push({ title: s.title, text });
         } catch (e) {
           setStatus(`Stopped at “${s.title}”: ${e.message}`);
           renderTransform();
@@ -932,14 +1010,7 @@
     const dl = $('#trDown');
     if (dl) dl.addEventListener('click', () => {
       const cur = store.get(TR_KEY, {}) || {};
-      const title = (W2.REPORT_TYPES[cur.type || 'empirical:q1'] || { label: 'Document' }).label;
-      const refs = [];
-      const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
-        (cur.sections[s.id].references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
-        return `<h2>${esc(s.title)}</h2>${paraList(cur.sections[s.id].text).map(p => `<p>${esc(p)}</p>`).join('')}`;
-      }).join('');
-      const refsHtml = refs.length ? `<h2>References</h2><ol>${refs.map(r => `<li>${esc(r)}</li>`).join('')}</ol>` : '';
-      const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title></head><body><h1>${esc(title)}</h1>${body}${refsHtml}</body></html>`;
+      const html = buildWordHtml(cur, secs);
       download('transformed-' + (cur.type || 'document').replace(/[^a-z0-9]+/gi, '-') + '.doc', html, 'application/msword');
     });
   }
