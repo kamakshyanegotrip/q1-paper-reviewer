@@ -231,13 +231,13 @@ return [{ json: { ok, text: draft, reason, warning: ok ? result.reason : undefin
 `;
 
 // The key-check node is copied from the literature workflow: an Execute Workflow call to "Q1 Auth - Check Key".
-function authNode() {
+function authNode(hook = 'Write webhook') {
   return { parameters: {
       source: 'database',
       workflowId: { __rl: true, mode: 'list', value: 'w062U1R4RCGmqZo9', cachedResultName: 'Q1 Auth - Check Key' },
       workflowInputs: { mappingMode: 'defineBelow', value: {
-        key: "={{ $('Write webhook').item.json.body.key }}",
-        review_id: "={{ $('Write webhook').item.json.body.review_id || '' }}" },
+        key: `={{ $('${hook}').item.json.body.key }}`,
+        review_id: `={{ $('${hook}').item.json.body.review_id || '' }}` },
         matchingColumns: [], schema: [], attemptToConvertTypes: false, convertFieldsToString: false },
       options: {} },
     id: 'write-auth', name: "Call 'Q1 Auth - Check Key'", type: 'n8n-nodes-base.executeWorkflow', typeVersion: 1.2, position: [260, 200] };
@@ -280,6 +280,38 @@ function writeWorkflow() {
 if (require.main === module) {
   fs.writeFileSync(path.join(__dirname, 'workflow.json'), JSON.stringify(workflow(), null, 2));
   fs.writeFileSync(path.join(__dirname, 'write-workflow.json'), JSON.stringify(writeWorkflow(), null, 2));
-  console.log('wrote lit/n8n/workflow.json and write-workflow.json');
+  fs.writeFileSync(path.join(__dirname, 'data-workflow.json'), JSON.stringify(dataWorkflow(), null, 2));
+  console.log('wrote lit/n8n/workflow.json, write-workflow.json and data-workflow.json');
 }
-module.exports = { workflow, writeWorkflow, bundle, RUNNER, FINISH, WRITE_RUNNER, WRITE_FINISH };
+// Data analysis relay: the browser posts the dataset and settings; n8n checks the key and forwards the file
+// to the statistics service (only reachable inside the n8n Docker network). Paste the service token into the
+// "Stats service" node's header in n8n, in place of REPLACE_WITH_TOKEN.
+function dataWorkflow() {
+  return {
+    name: 'Q1 Data analysis (relay)',
+    nodes: [
+      { parameters: { httpMethod: 'POST', path: 'q1-data-analysis', responseMode: 'responseNode', options: { rawBody: false } },
+        id: 'data-webhook', name: 'Data webhook', type: 'n8n-nodes-base.webhook', typeVersion: 2, position: [0, 200], webhookId: 'q1-data-analysis' },
+      authNode('Data webhook'),
+      { parameters: {
+          method: 'POST', url: 'http://q1-stats:8000/analyze-data', sendBody: true, contentType: 'multipart-form-data',
+          bodyParameters: { parameters: [
+            { name: 'spec', value: "={{ $('Data webhook').item.json.body.spec }}" },
+            { name: 'file', parameterType: 'formBinaryData', inputDataFieldName: 'file' } ] },
+          sendHeaders: true, headerParameters: { parameters: [{ name: 'X-Q1-Token', value: 'REPLACE_WITH_TOKEN' }] },
+          options: { timeout: 170000 } },
+        id: 'data-stats', name: 'Stats service', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [520, 200], continueOnFail: true },
+      { parameters: { respondWith: 'json', responseBody: "={{ $json.error ? { error: 'The statistics service could not run this analysis.' } : $json }}", options: {} },
+        id: 'data-respond', name: 'Data respond', type: 'n8n-nodes-base.respondToWebhook', typeVersion: 1.1, position: [760, 200] }
+    ],
+    connections: {
+      'Data webhook': { main: [[{ node: "Call 'Q1 Auth - Check Key'", type: 'main', index: 0 }]] },
+      "Call 'Q1 Auth - Check Key'": { main: [[{ node: 'Stats service', type: 'main', index: 0 }]] },
+      'Stats service': { main: [[{ node: 'Data respond', type: 'main', index: 0 }]] }
+    },
+    settings: { executionOrder: 'v1' },
+    active: false
+  };
+}
+
+module.exports = { workflow, writeWorkflow, dataWorkflow, bundle, RUNNER, FINISH, WRITE_RUNNER, WRITE_FINISH };
