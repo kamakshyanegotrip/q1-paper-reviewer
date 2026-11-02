@@ -187,7 +187,15 @@
 
   // The prompt that rewrites the source article into one section of the target format.
   // The target format's section list is given so the section fits the whole document.
-  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '', instruction = '' }) {
+  // Writing approaches the user can pick for a transform or update.
+  const APPROACH_BRIEF = {
+    informative: 'Informative. Explain the facts, evidence and context clearly and neutrally; report what the sources show without arguing a position.',
+    analytical: 'Analytical. Break the topic into its parts, examine how they relate, compare the evidence, and explain causes and implications.',
+    argumentative: 'Argumentative. State a clear thesis, build the case with evidence from the source and the new literature, and address the strongest counter-arguments.',
+    descriptive: 'Descriptive. Set out what, who, where and how in organised detail, without interpretation beyond the sources.',
+    detailed: 'Detailed. Expand each point with fuller explanation, examples, figures and supporting evidence, without padding.'
+  };
+  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '', instruction = '', approach = '' }) {
     const t = T.REPORT_TYPES[type] || { label: 'document', sections: [] };
     const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '' };
     const plan = sectionsOf(type).filter(x => x.id !== 'references').map(x => `- ${x.title}${x.fixed != null ? ' (fixed length)' : ''}`).join('\n');
@@ -209,6 +217,7 @@
       '- Present every table as a markdown table: a header row of "|"-separated column names, a separator row such as "|---|---|", then one row per data line. Put a caption line directly above each table in the form "Table N: title", and write the table number and title in bold.',
       '- Write in formal academic English.'
     ];
+    if (APPROACH_BRIEF[approach]) lines.push('Writing approach: ' + APPROACH_BRIEF[approach]);
     if (instruction && String(existing).trim()) {
       lines.push(`Revise the section below as instructed: ${String(instruction).slice(0, 1000)}`);
       lines.push('Keep the section\'s content, structure and citation keys unless the instruction says otherwise. Where new sources are listed, integrate the relevant ones and cite each new claim with {{cite:KEY}}. Output the complete revised section only.');
@@ -223,7 +232,7 @@
     return lines.filter(x => x !== '').join('\n');
   }
 
-  const api = { buildTransformPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
+  const api = { APPROACH_BRIEF, buildTransformPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);
