@@ -773,6 +773,29 @@
     const hay = names.join(' | ').toLowerCase();
     return TR_TRUSTED.some(t => hay.includes(t));
   }
+  // Crossref (journal articles) and Europe PMC (biomedical and health repositories), reshaped like OpenAlex works so the writer can read them.
+  async function crossrefSearch(query, year) {
+    const filter = ['type:journal-article', year ? `from-pub-date:${year}-01-01` : ''].filter(Boolean).join(',');
+    const d = await (await fetch('https://api.crossref.org/works?' + new URLSearchParams({ query, rows: '8', filter }).toString())).json();
+    return ((d.message && d.message.items) || []).map(it => ({
+      id: 'doi:' + (it.DOI || it.URL || it.title), doi: it.DOI ? 'https://doi.org/' + it.DOI : null,
+      title: (it.title || [''])[0], publication_year: ((((it.issued || {})['date-parts'] || [[]])[0]) || [])[0] || null,
+      authorships: (it.author || []).map(a => ({ author: { display_name: [a.given, a.family].filter(Boolean).join(' ') }, institutions: [] })),
+      primary_location: { source: { display_name: (it['container-title'] || [''])[0] } },
+      type: 'journal-article', cited_by_count: it['is-referenced-by-count'] || 0, abstract_inverted_index: null, is_retracted: false
+    })).filter(w => w.title);
+  }
+  async function europePmcSearch(query, year) {
+    const q = year ? `${query} AND PUB_YEAR:[${year} TO 2100]` : query;
+    const d = await (await fetch('https://www.ebi.ac.uk/europepmc/webservices/rest/search?' + new URLSearchParams({ query: q, format: 'json', pageSize: '8', resultType: 'core' }).toString())).json();
+    return ((d.resultList && d.resultList.result) || []).map(r => ({
+      id: 'epmc:' + (r.doi || r.pmid || r.id || r.title), doi: r.doi ? 'https://doi.org/' + r.doi : null,
+      title: r.title || '', publication_year: Number(r.pubYear) || null,
+      authorships: String(r.authorString || '').split(',').map(s => s.trim()).filter(Boolean).map(n => ({ author: { display_name: n }, institutions: [] })),
+      primary_location: { source: { display_name: r.journalTitle || 'Europe PMC' } },
+      type: 'article', cited_by_count: r.citedByCount || 0, abstract_inverted_index: null, is_retracted: false
+    })).filter(w => w.title);
+  }
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
     for (const t of srcTypes) {
@@ -781,7 +804,9 @@
       const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
       let res = (d.results || []).filter(w => !w.is_retracted);
       if (t === 'gov') res = res.filter(isTrustedWork);
-      res.slice(0, 8).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
+      if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
+      if (t === 'other') res = res.concat(await europePmcSearch(query, year).catch(() => []));
+      res.slice(0, 12).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
     }
     return out;
   }
@@ -851,9 +876,32 @@
   function mdToHtml(text, style) {
     const out = [];
     let inList = false;
-    for (const raw of String(text || '').split('\n')) {
-      const line = raw.trim();
+    const L = String(text || '').split('\n');
+    for (let k = 0; k < L.length; k++) {
+      const line = L[k].trim();
       if (!line) { if (inList) { out.push('</ul>'); inList = false; } continue; }
+      // Markdown table: a header row with "|", a separator row, then data rows.
+      if (line.startsWith('|') && k + 1 < L.length && /^\|?\s*:?-{2,}/.test(L[k + 1].trim())) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        const rows = [];
+        let j = k;
+        while (j < L.length && L[j].trim().startsWith('|')) { rows.push(L[j].trim()); j++; }
+        const cells = r => r.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
+        const head = cells(rows[0]);
+        const body = rows.slice(2).map(cells);
+        const cellStyle = 'border:1px solid #000;padding:3pt 5pt;font-size:10pt;line-height:1.15;text-align:left;vertical-align:top';
+        out.push(`<table style="border-collapse:collapse;width:100%;margin:6pt 0 12pt">` +
+          `<thead><tr>${head.map(c => `<th style="${cellStyle};font-weight:bold">${mdInline(c)}</th>`).join('')}</tr></thead>` +
+          `<tbody>${body.map(r => `<tr>${r.map(c => `<td style="${cellStyle}">${mdInline(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+        k = j - 1;
+        continue;
+      }
+      // Table caption, e.g. "Table 9: Major source countries" (kept above the table).
+      if (/^(\*\*)?table\s+\d+/i.test(line)) {
+        if (inList) { out.push('</ul>'); inList = false; }
+        out.push(`<p style="font-weight:bold;text-indent:0;margin:12pt 0 4pt;text-align:left">${mdInline(line)}</p>`);
+        continue;
+      }
       const h = line.match(/^(#{1,3})\s+(.*)$/);
       if (h) {
         if (inList) { out.push('</ul>'); inList = false; }
@@ -913,10 +961,61 @@
       const picks = foundPicks[secId] || [];
       return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`).join('')}</div>`;
     };
+    // ---- paragraph-level view: each paragraph is its own box with its own controls ----
+    const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
+    const isHeadBlock = b => /^#{1,3}\s/.test(b);
+    const wordsIn = t => String(t || '').trim().split(/\s+/).filter(Boolean).length;
+    const blocksHtml = (secId, text) => blocksOf(text).map((b, i, arr) => {
+      if (isHeadBlock(b)) return `<div style="font-weight:600;margin:12px 0 4px">${esc(b.replace(/^#+\s*/, ''))}</div>`;
+      const canSuit = i > 0 && !isHeadBlock(arr[i - 1]);
+      const key = esc(secId) + '|' + i;
+      return `<div style="border:1px solid #e2dccd;border-radius:8px;padding:8px;margin:6px 0">
+          <textarea rows="4" data-tr-p="${key}" style="width:100%">${esc(b)}</textarea>
+          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
+            ${canSuit ? `<button class="btn btn-sm" type="button" data-tr-suit="${key}">Suit previous paragraph</button>` : ''}
+            <button class="btn btn-sm" type="button" data-tr-pmod="${key}">Modify with AI</button>
+          </div>
+          <input type="text" data-tr-pinstr="${key}" placeholder="Instruction for Modify with AI" style="width:100%;margin-top:6px">
+        </div>
+        <button class="btn btn-sm" type="button" data-tr-plus="${key}" style="margin:0 0 8px">+ Add paragraph below</button>`;
+    }).join('');
+    const paraState = secId => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const text = ((cur.sections || {})[secId] || {}).text || '';
+      return { cur, blocks: blocksOf(text) };
+    };
+    const saveBlocks = (secId, blocks) => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const sections = Object.assign({}, cur.sections || {});
+      sections[secId] = Object.assign({}, sections[secId] || {}, { text: blocks.join('\n\n') });
+      saveJob({ sections });
+    };
+    const paraRevise = async (secId, i, mode, instruction) => {
+      const { cur, blocks } = paraState(secId);
+      const previous = i > 0 && !isHeadBlock(blocks[i - 1]) ? blocks[i - 1] : '';
+      const d = await apiPostForm(WRITE_PATH, { action: 'revise', type: cur.type || 'empirical:q1', section: secId, mode, modification: cur.modType, paragraph: blocks[i], previous, instruction: instruction || '', style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', hint: '', words: wordsIn(blocks[i]) });
+      if (!d.ok) throw new Error(d.reason || 'The paragraph could not be revised.');
+      blocks[i] = d.text || blocks[i];
+      saveBlocks(secId, blocks);
+    };
+    const paraAction = async (key, mode, instruction) => {
+      const [secId, i] = key.split('|');
+      const cur = store.get(TR_KEY, {}) || {};
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      if (!cur.modType) { setStatus('Choose a modification type first.'); return; }
+      if (mode === 'discuss' && !instruction) { setStatus('Write the instruction for the AI first.'); return; }
+      try {
+        setStatus('Revising the paragraph…');
+        await paraRevise(secId, Number(i), mode, instruction);
+        renderTransform();
+        setStatus('Paragraph updated.');
+      } catch (e) { setStatus(e.message); }
+    };
+
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
       return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
-        ${text ? `<textarea rows="8" data-tr-edit="${esc(s.id)}" style="width:100%">${esc(text)}</textarea>` : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
+        ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
           <button class="btn btn-sm" type="button" data-tr-find="${esc(s.id)}">Find literature</button>
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
@@ -950,6 +1049,7 @@
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Transform</h2><small>one section at a time, in the target format's order</small></div>
+        <label class="field"><span>Modification type <i>required for paragraph changes</i></span><select id="trModType"><option value="">Choose one</option>${['argumentative', 'discussion', 'analytical', 'theory'].map(k => `<option value="${k}"${(job.modType || '') === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
         <fieldset style="border:0;padding:0;margin:0 0 12px"><legend style="font-size:14px;margin-bottom:6px">Update literature from</legend>
           ${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:14px;font-size:14px"><input type="checkbox" data-src="${k}"${srcTypes.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}
         </fieldset>
@@ -1133,6 +1233,28 @@
       setStatus('All sections updated with literature. Check each section, then download.');
       renderTransform();
     });
+
+    // ---- paragraph controls ----
+    const modSel = $('#trModType');
+    if (modSel) modSel.addEventListener('change', () => saveJob({ modType: modSel.value }));
+    app.querySelectorAll('textarea[data-tr-p]').forEach(t => t.addEventListener('change', () => {
+      const [secId, i] = t.dataset.trP.split('|');
+      const { blocks } = paraState(secId);
+      if (t.value.trim()) blocks[Number(i)] = t.value.trim();
+      saveBlocks(secId, blocks);
+    }));
+    app.querySelectorAll('[data-tr-suit]').forEach(b => b.addEventListener('click', () => paraAction(b.dataset.trSuit, 'connect', '')));
+    app.querySelectorAll('[data-tr-pmod]').forEach(b => b.addEventListener('click', () => {
+      const instr = ((app.querySelector(`input[data-tr-pinstr="${b.dataset.trPmod}"]`) || {}).value || '').trim();
+      paraAction(b.dataset.trPmod, 'discuss', instr);
+    }));
+    app.querySelectorAll('[data-tr-plus]').forEach(b => b.addEventListener('click', () => {
+      const [secId, i] = b.dataset.trPlus.split('|');
+      const { blocks } = paraState(secId);
+      blocks.splice(Number(i) + 1, 0, 'New paragraph: write the instruction in the box, then click Modify with AI.');
+      saveBlocks(secId, blocks);
+      renderTransform();
+    }));
 
     const dl = $('#trDown');
     if (dl) dl.addEventListener('click', () => {
