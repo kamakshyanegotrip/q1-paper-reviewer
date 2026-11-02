@@ -1257,7 +1257,9 @@
     const apSel = $('#trApproach');
     if (apSel) apSel.addEventListener('change', () => saveJob({ approach: apSel.value }));
     const queryFor = sec => {
-      const topic = String((store.get(TR_KEY, {}) || {}).query || '').trim();
+      const cur = store.get(TR_KEY, {}) || {};
+      // Topic: the Step 2 topic if given, else the article's title or opening words, so searches are not just the section heading.
+      const topic = String(cur.query || '').trim() || String(cur.title || '').trim() || String(cur.source || '').trim().split(/\s+/).slice(0, 12).join(' ');
       const heading = sec.title.replace(/^(chapter\s*\d+\.?|\d+(\.\d+)*\.?)\s*/i, '').trim();
       return [topic, heading].filter(Boolean).join(' ');
     };
