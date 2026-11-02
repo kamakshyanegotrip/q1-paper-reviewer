@@ -134,6 +134,8 @@
       `- Length: about ${target} words.`,
       '- Write in formal academic English.'
     ];
+    const markers = [...new Set(String(paragraph).match(/\{\{cite:[^}]*\}\}/g) || [])];
+    if (markers.length) lines.push(`- Keep these citation markers exactly as written, in the same place in the text, and do not remove or change them: ${markers.join(' ')}`);
     if (mode === 'connect' && previous) lines.push(`Previous paragraph (connect to it):\n${previous}`);
     if (mode === 'discuss') lines.push(`Author's instruction: ${String(instruction || '').trim() || '(none given)'}`);
     lines.push(`Paragraph to revise:\n${paragraph}`);
