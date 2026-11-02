@@ -1227,7 +1227,7 @@
       let text = '', refs = [];
       for (let attempt = 0; attempt < 4; attempt++) {
         const have = wordCount(text);
-        if (attempt > 0 && have >= target * 0.85) break;
+        if (attempt > 0 && have >= target) break;
         setStatus(`Updating “${sec.title}”: ${have} of ${target} words so far…`);
         const first = attempt === 0;
         const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, {
@@ -1241,7 +1241,7 @@
         (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
       }
       const after = wordCount(text);
-      if (existing && after < before * 0.85) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
+      if (existing && after < before) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
       sections[sec.id] = { text: text || existing, references: mergeRefs((sections[sec.id] || {}).references, refs) };
       saveJob({ sections });
     };
