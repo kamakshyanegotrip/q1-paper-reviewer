@@ -861,7 +861,7 @@
         $('#trSource').value = text; saveJob({ source: text });
       } catch (err) { alert(err.message); e.target.value = ''; }
     });
-    $('#trType').addEventListener('change', e => saveJob({ type: e.target.value, sections: {} }));
+    $('#trType').addEventListener('change', e => { saveJob({ type: e.target.value, sections: {} }); renderTransform(); });
     $('#trWords').addEventListener('change', e => saveJob({ words: Math.max(300, Number(e.target.value) || 6000) }));
     $('#trQuery').addEventListener('change', e => saveJob({ query: e.target.value }));
     $('#trYear').addEventListener('change', e => saveJob({ yearFrom: e.target.value }));
