@@ -204,6 +204,9 @@
       `- Length: about ${words} words (no more than 10% above or below).`,
       '- Start with the section title as a heading. Separate paragraphs with a blank line.',
       '- Use markdown: "#" for the chapter or section title, "##" for its subsections, "###" for sub-subsections. Use "**bold**" and "*italic*" only where the source uses them.',
+      '- Tables: keep every table as a markdown pipe table (a header row, a separator row, then one row per line). Put its caption on the line directly above it, in the form "Table N: title", with the original number and title. Never turn table cells into plain lines.',
+      '- Figures: keep the caption on its own line, in the form "Figure N: title", with the original number and title.',
+      '- Present every table as a markdown table: a header row of "|"-separated column names, a separator row such as "|---|---|", then one row per data line. Put a caption line directly above each table in the form "Table N: title", and write the table number and title in bold.',
       '- Write in formal academic English.'
     ];
     if (instruction && String(existing).trim()) {
