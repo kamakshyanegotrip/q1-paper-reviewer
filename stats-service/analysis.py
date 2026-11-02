@@ -194,7 +194,10 @@ def run_analyses(df, spec):
         out['descriptives'] = describe(df, desc_cols)
         for r in out['descriptives']:
             out['sentences'].append('%s: M = %s, SD = %s (n = %d).' % (r['variable'], num_text(r['mean']), num_text(r['sd']), r['n']))
-    for rel in spec.get('reliability') or []:
+    rel_specs = list(spec.get('reliability') or [])
+    if not rel_specs and spec.get('constructs'):
+        rel_specs = [{'name': c.get('name'), 'items': c.get('items') or []} for c in spec['constructs']]
+    for rel in rel_specs:
         res = cronbach(df, rel['items'])
         res['name'] = rel.get('name') or 'Scale'
         out['reliability'].append(res)
