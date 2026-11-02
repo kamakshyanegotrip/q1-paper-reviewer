@@ -886,11 +886,11 @@
       const line = L[k].trim();
       if (!line) { if (inList) { out.push('</ul>'); inList = false; } continue; }
       // Markdown table: a header row with "|", a separator row, then data rows.
-      if (line.startsWith('|') && k + 1 < L.length && /^\|?\s*:?-{2,}/.test(L[k + 1].trim())) {
+      if (line.includes('|') && k + 1 < L.length && /^\|?\s*:?-{2,}[\s|:-]*$/.test(L[k + 1].trim())) {
         if (inList) { out.push('</ul>'); inList = false; }
         const rows = [];
         let j = k;
-        while (j < L.length && L[j].trim().startsWith('|')) { rows.push(L[j].trim()); j++; }
+        while (j < L.length && L[j].trim().includes('|')) { rows.push(L[j].trim()); j++; }
         const cells = r => r.replace(/^\|/, '').replace(/\|$/, '').split('|').map(c => c.trim());
         const head = cells(rows[0]);
         const body = rows.slice(2).map(cells);
@@ -1195,17 +1195,38 @@
       if (!types.length) throw new Error('Choose at least one literature source above.');
       return findLiterature(queryFor(sec), types, (store.get(TR_KEY, {}) || {}).yearFrom || '');
     };
+    // Literature update: revise the section, then keep asking for the missing words (as the transform does)
+    // until it reaches its planned length. The section is kept as it was if the result is still too short.
     const reviseSection = async (sec, instruction, works) => {
       const cur = store.get(TR_KEY, {}) || {};
       const sections = Object.assign({}, cur.sections || {});
       const existing = (sections[sec.id] || {}).text || '';
-      const words = Math.max(300, existing.trim().split(/\s+/).filter(Boolean).length);
-      const d = await apiPostForm(WRITE_PATH, { action: 'transform', type: cur.type || 'empirical:q1', section: sec.id, words, source: cur.source || existing, works: JSON.stringify(works || []), style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', existing, instruction });
-      if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
-      const before = existing.trim().split(/\s+/).filter(Boolean).length;
-      const after = String(d.text || '').trim().split(/\s+/).filter(Boolean).length;
+      const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
+      const before = wordCount(existing);
+      const t = cur.type || 'empirical:q1';
+      const planned = PL2.buildOutline(t, Math.max(300, Number(cur.words) || 6000), cur.budgets || {}).sections.find(x => x.id === sec.id).words;
+      const target = Math.max(planned, before);
+      const note = instruction || 'Revise the section to use the new sources listed, keeping its content and structure.';
+      const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]' };
+      let text = '', refs = [];
+      for (let attempt = 0; attempt < 4; attempt++) {
+        const have = wordCount(text);
+        if (attempt > 0 && have >= target * 0.85) break;
+        setStatus(`Updating “${sec.title}”: ${have} of ${target} words so far…`);
+        const first = attempt === 0;
+        const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, {
+          words: first ? target : Math.max(300, target - have),
+          existing: first ? existing : text,
+          instruction: first ? note : ''
+        }));
+        if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be revised.'); break; }
+        if (!String(d.text || '').trim()) break;
+        text = first ? d.text : text + '\n\n' + d.text;
+        (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
+      }
+      const after = wordCount(text);
       if (existing && after < before * 0.85) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
-      sections[sec.id] = { text: d.text || existing, references: mergeRefs((sections[sec.id] || {}).references, d.references) };
+      sections[sec.id] = { text: text || existing, references: mergeRefs((sections[sec.id] || {}).references, refs) };
       saveJob({ sections });
     };
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
