@@ -763,6 +763,45 @@
   const TR_SELECT = 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted';
   const workLine = w => { const au = (w.authorships || [])[0]; const who = au && au.author ? au.author.display_name : 'Unknown author'; return `${w.title || 'Untitled'} (${who}, ${w.publication_year || 'n.d.'})`; };
 
+  // Reads an uploaded article (.txt, .docx, .pdf) into plain text. Libraries load on first use.
+  const TR_LIBS = {
+    mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',
+    pdfjs: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+    pdfworker: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+  };
+  function loadScriptOnce(url) {
+    return new Promise((resolve, reject) => {
+      if (document.querySelector('script[src="' + url + '"]')) return resolve();
+      const s = document.createElement('script');
+      s.src = url; s.onload = resolve;
+      s.onerror = () => reject(new Error('Could not load a reader library. Check your connection and try again.'));
+      document.head.appendChild(s);
+    });
+  }
+  async function extractArticleText(file) {
+    const name = file.name.toLowerCase();
+    if (name.endsWith('.txt')) return file.text();
+    if (name.endsWith('.docx')) {
+      await loadScriptOnce(TR_LIBS.mammoth);
+      const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+      return r.value.trim();
+    }
+    if (name.endsWith('.pdf')) {
+      await loadScriptOnce(TR_LIBS.pdfjs);
+      window.pdfjsLib.GlobalWorkerOptions.workerSrc = TR_LIBS.pdfworker;
+      const doc = await window.pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+      let text = '';
+      for (let p = 1; p <= doc.numPages; p++) {
+        const page = await doc.getPage(p);
+        const content = await page.getTextContent();
+        text += content.items.map(i => i.str).join(' ') + '\n\n';
+      }
+      return text.trim();
+    }
+    if (name.endsWith('.doc')) throw new Error('Old .doc files cannot be read here. Open the file in Word, use Save As and choose .docx, then upload that.');
+    throw new Error('Unsupported file. Upload a .docx, .pdf or .txt file.');
+  }
+
   function renderTransform() {
     const W2 = window.Q1Write, PL2 = window.Q1Plan;
     const job = store.get(TR_KEY, {}) || {};
@@ -788,7 +827,7 @@
         <div class="card-head"><h2 style="margin:0">Transform an article</h2><small>Turn an article into another format, and update it with new literature</small></div>
         <p class="muted" style="font-size:14px;margin:4px 0 12px">Paste the article text or choose a .txt file. Word and PDF upload is not connected yet, so paste the text from those files for now.</p>
         <label class="field"><span>Article text</span><textarea id="trSource" rows="8" placeholder="Paste the article here">${esc(job.source || '')}</textarea></label>
-        <input type="file" id="trFile" accept=".txt,text/plain" style="margin:6px 0 12px">
+        <input type="file" id="trFile" accept=".txt,.docx,.pdf,.doc" style="margin:6px 0 12px">
         <div class="grid two">
           <label class="field"><span>Transform into</span><select id="trType">${typeOptions}</select></label>
           <label class="field"><span>Total length (words)</span><input type="number" id="trWords" min="300" max="60000" step="100" value="${esc(job.words || 6000)}"></label>
@@ -817,7 +856,10 @@
     $('#trSource').addEventListener('change', e => saveJob({ source: e.target.value }));
     $('#trFile').addEventListener('change', async e => {
       const f = e.target.files && e.target.files[0]; if (!f) return;
-      const text = await f.text(); $('#trSource').value = text; saveJob({ source: text });
+      try {
+        const text = await extractArticleText(f);
+        $('#trSource').value = text; saveJob({ source: text });
+      } catch (err) { alert(err.message); e.target.value = ''; }
     });
     $('#trType').addEventListener('change', e => saveJob({ type: e.target.value, sections: {} }));
     $('#trWords').addEventListener('change', e => saveJob({ words: Math.max(300, Number(e.target.value) || 6000) }));
