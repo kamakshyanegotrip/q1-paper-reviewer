@@ -950,8 +950,16 @@
     const refByKey = {};
     secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[r.key]) refByKey[r.key] = r.text; }));
     const citeNums = new Map();
+    // A marker that is not a real key (for example "Name, 2022") is matched to the reference with that author and year.
+    const allRefTexts = Object.values(refByKey);
+    const byAuthorYear = key => {
+      const y = (String(key).match(/\b(19|20)\d{2}\b/) || [])[0];
+      const name = String(key).split(',')[0].trim().toLowerCase().replace(/[^a-z]/g, '');
+      if (!y || name.length < 3) return null;
+      return allRefTexts.find(t => String(t).includes(y) && String(t).toLowerCase().replace(/[^a-z]/g, '').includes(name)) || null;
+    };
     const citeOf = key => {
-      const text = refByKey[key];
+      const text = refByKey[key] || byAuthorYear(key);
       if (!text) return '[citation needed]';
       if (TR_NUMBERED.includes(refStyle)) { if (!citeNums.has(key)) citeNums.set(key, citeNums.size + 1); return '[' + citeNums.get(key) + ']'; }
       const m = String(text).match(/^(.*?)\s*\((\d{4}|n\.d\.)[a-z]?\)/);
