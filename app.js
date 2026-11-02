@@ -536,6 +536,7 @@
         bootstrap: Math.max(0, Math.min(1000, Number($('#daBoot').value) || 200)),
         constructs, paths,
         describe: csvList($('#daDescribe').value),
+        correlations: csvList($('#daDescribe').value).length >= 2 ? csvList($('#daDescribe').value) : undefined,
         regression: y && x.length ? { y, x } : undefined
       };
       if (!constructs.length && !spec.describe.length && !spec.regression) { daStatus('Add constructs, variables to describe, or a regression.'); return; }
