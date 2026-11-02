@@ -945,6 +945,21 @@
     const style = type.family === 'book' ? FORMAT_STYLE.book : FORMAT_STYLE.article;
     const title = String(cur.title || '').trim() || type.label;
     const refs = [];
+    // In-text citations: each {{cite:KEY}} becomes (Author, Year), or [n] in numbered styles, from the saved references.
+    const refStyle = trRefStyle(cur);
+    const refByKey = {};
+    secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[r.key]) refByKey[r.key] = r.text; }));
+    const citeNums = new Map();
+    const citeOf = key => {
+      const text = refByKey[key];
+      if (!text) return '[citation needed]';
+      if (TR_NUMBERED.includes(refStyle)) { if (!citeNums.has(key)) citeNums.set(key, citeNums.size + 1); return '[' + citeNums.get(key) + ']'; }
+      const m = String(text).match(/^(.*?)\s*\((\d{4}|n\.d\.)[a-z]?\)/);
+      const year = m ? m[2] : ((String(text).match(/\d{4}/) || [''])[0]);
+      // Author: the first author's surname; with no author, the first few words of the title.
+      const surname = m && m[1].trim() ? m[1].split(',')[0].trim() : String(text).replace(/^\(?\d{4}\)?\.?\s*/, '').split(/[.:]/)[0].trim().split(/\s+/).slice(0, 4).join(' ');
+      return '(' + surname + (year ? ', ' + year : '') + ')';
+    };
     const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
       const sec = cur.sections[s.id];
       (sec.references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
@@ -953,7 +968,7 @@
       const lead = hasHeading ? '' : (type.family === 'book'
         ? `<h1 style="${style.h1}">${esc(s.title)}</h1>`
         : `<h2 style="${style.h2}">${esc(s.title)}</h2>`);
-      return lead + mdToHtml(sec.text, style);
+      return lead + mdToHtml(String(sec.text).replace(/\{\{cite:([^}]+)\}\}/g, (_, k) => citeOf(k.trim())), style);
     }).join('\n');
     const titlePage = `<p style="text-align:center;font-size:20pt;font-weight:bold;margin-top:120pt">${esc(title)}</p><p style="text-align:center;margin-top:12pt">${esc(type.label)}</p>`;
     const refsHtml = refs.length
