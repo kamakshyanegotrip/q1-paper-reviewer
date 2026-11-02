@@ -187,7 +187,7 @@
 
   // The prompt that rewrites the source article into one section of the target format.
   // The target format's section list is given so the section fits the whole document.
-  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {} }) {
+  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '' }) {
     const t = T.REPORT_TYPES[type] || { label: 'document', sections: [] };
     const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '' };
     const plan = sectionsOf(type).filter(x => x.id !== 'references').map(x => `- ${x.title}${x.fixed != null ? ' (fixed length)' : ''}`).join('\n');
@@ -203,9 +203,14 @@
       sourcesText ? '' : '- Make no citations; no new sources were provided.',
       `- Length: about ${words} words (no more than 10% above or below).`,
       '- Start with the section title as a heading. Separate paragraphs with a blank line.',
+      '- Use markdown: "#" for the chapter or section title, "##" for its subsections, "###" for sub-subsections. Use "**bold**" and "*italic*" only where the source uses them.',
       '- Write in formal academic English.'
     ];
-    lines.push(`Source article:\n${String(source || '').slice(0, 40000)}`);
+    if (existing && String(existing).trim()) {
+      lines.push(`The section below is already written but is about ${countWords(existing)} words short of the target. Continue it: write about ${words} more words that extend the section with material from the source that is not yet covered. Do not repeat what is written, do not restart the title, and do not write a conclusion for the whole document. Output only the new text.`);
+      lines.push(`Section written so far:\n${clip(String(existing), 30000)}`);
+    }
+    lines.push(`Source article:\n${String(source || '').slice(0, 200000)}`);
     if (prior.length) lines.push('Sections already transformed (keep consistent with them):\n' + prior.map(p => `## ${p.title}\n${clip(p.text, 2500)}`).join('\n\n'));
     if (sourcesText) lines.push(`Sources:\n${sourcesText}`);
     return lines.filter(x => x !== '').join('\n');

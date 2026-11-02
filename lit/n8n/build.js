@@ -202,7 +202,7 @@ const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';
 const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
 const prompt = transform
-  ? P.buildTransformPrompt({ type, section, words, source: String(b.source || ''), prior, sourcesText, project })
+  ? P.buildTransformPrompt({ type, section, words, source: String(b.source || ''), prior, sourcesText, project, existing: String(b.existing || '').slice(0, 60000) })
   : para
   ? P.buildParagraphPrompt({ type, section, point, words, prior: priorParas, hint, sourcesText, style: String(b.style || ''), project, position: Number(b.position) || 1, total: Number(b.total) || 1 })
   : revise
