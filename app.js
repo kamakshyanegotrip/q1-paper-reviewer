@@ -770,6 +770,18 @@
   // Bibliography order: alphabetical for author-date styles, order of first citation for numbered styles.
   const sortRefs = (list, style) => TR_NUMBERED.includes(style) ? list.slice() : list.slice().sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const trRefStyle = job => (job && job.style) || (store.get('wr:project', {}) || {}).style || 'apa7';
+  // Keeps a section to its own chapter: cuts at the first heading that starts another chapter or subsection.
+  const trTrimForeign = (text, secId) => {
+    const own = (String(secId || '').match(/chapter_(\d+)/) || [])[1] || null;
+    const lines = String(text || '').split('\n');
+    const cut = lines.findIndex(l => {
+      if (!/^#{1,3}\s/.test(l.trim())) return false;
+      const t = l.trim().replace(/^#+\s*/, '');
+      const num = (t.match(/^chapter\s+(\d+)/i) || t.match(/^(\d+)\.\d/) || [])[1];
+      return !!num && num !== own;
+    });
+    return (cut < 0 ? lines : lines.slice(0, cut)).join('\n').trim();
+  };
   const TR_APPROACHES = { informative: 'Informative', analytical: 'Analytical', argumentative: 'Argumentative', descriptive: 'Descriptive', detailed: 'Detailed' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
@@ -1184,7 +1196,7 @@
             if (!String(d.text || '').trim()) break;
             text = attempt === 0 ? d.text : text + '\n\n' + d.text;
             (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
-            out[s.id] = { text, references: refs };
+            out[s.id] = { text: trTrimForeign(text, s.id), references: refs };
             saveJob({ sections: out });
           }
           prior.push({ title: s.title, text });
@@ -1223,7 +1235,7 @@
       const heading = sec.title.replace(/^(chapter\s*\d+\.?|\d+(\.\d+)*\.?)\s*/i, '').trim();
       return [topic, heading].filter(Boolean).join(' ');
     };
-    const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part.';
+    const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part. Write only this section: do not write or repeat any other chapter or heading.';
     const findFor = async sec => {
       const types = ((store.get(TR_KEY, {}) || {}).secSrc || {})[sec.id] || srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source for this section.');
@@ -1234,7 +1246,7 @@
     const reviseSection = async (sec, instruction, works) => {
       const cur = store.get(TR_KEY, {}) || {};
       const sections = Object.assign({}, cur.sections || {});
-      const existing = (sections[sec.id] || {}).text || '';
+      const existing = trTrimForeign((sections[sec.id] || {}).text || '', sec.id);
       const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
       const before = wordCount(existing);
       const t = cur.type || 'empirical:q1';
@@ -1258,6 +1270,7 @@
         text = first ? d.text : text + '\n\n' + d.text;
         (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
       }
+      text = trTrimForeign(text, sec.id);
       const after = wordCount(text);
       if (existing && after < before) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
       sections[sec.id] = { text: text || existing, references: mergeRefs((sections[sec.id] || {}).references, refs) };
