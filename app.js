@@ -765,6 +765,11 @@
 
   // Literature sources for Transform. OpenAlex filters by work type; government and research bodies are kept only if they are on the trusted list.
   const TR_SRC_LABELS = { articles: 'Articles', reports: 'Reports', gov: 'Official / govt sites', other: 'Repositories' };
+  const TR_STYLES = [['apa7', 'APA 7'], ['harvard', 'Harvard'], ['vancouver', 'Vancouver'], ['chicago', 'Chicago (author-date)'], ['ieee', 'IEEE'], ['mla', 'MLA 9']];
+  const TR_NUMBERED = ['vancouver', 'ieee'];
+  // Bibliography order: alphabetical for author-date styles, order of first citation for numbered styles.
+  const sortRefs = (list, style) => TR_NUMBERED.includes(style) ? list.slice() : list.slice().sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
+  const trRefStyle = job => (job && job.style) || (store.get('wr:project', {}) || {}).style || 'apa7';
   const TR_APPROACHES = { informative: 'Informative', analytical: 'Analytical', argumentative: 'Argumentative', descriptive: 'Descriptive', detailed: 'Detailed' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
@@ -940,7 +945,7 @@
     }).join('\n');
     const titlePage = `<p style="text-align:center;font-size:20pt;font-weight:bold;margin-top:120pt">${esc(title)}</p><p style="text-align:center;margin-top:12pt">${esc(type.label)}</p>`;
     const refsHtml = refs.length
-      ? `<h1 style="${style.h2}">References</h1>` + refs.map(r => `<p style="margin:0 0 6pt 0.5in;text-indent:-0.5in">${mdInline(r)}</p>`).join('')
+      ? `<h1 style="${style.h2}">References</h1>` + sortRefs(refs, trRefStyle(cur)).map(r => `<p style="margin:0 0 6pt 0.5in;text-indent:-0.5in">${mdInline(r)}</p>`).join('')
       : '';
     return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{${style.body}}</style></head><body>${titlePage}${body}${refsHtml}</body></html>`;
   }
@@ -999,7 +1004,7 @@
     const paraRevise = async (secId, i, mode, instruction) => {
       const { cur, blocks } = paraState(secId);
       const previous = i > 0 && !isHeadBlock(blocks[i - 1]) ? blocks[i - 1] : '';
-      const d = await apiPostForm(WRITE_PATH, { action: 'revise', type: cur.type || 'empirical:q1', section: secId, mode, modification: cur.modType, paragraph: blocks[i], previous, instruction: instruction || '', style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', hint: '', words: wordsIn(blocks[i]) });
+      const d = await apiPostForm(WRITE_PATH, { action: 'revise', type: cur.type || 'empirical:q1', section: secId, mode, modification: cur.modType, paragraph: blocks[i], previous, instruction: instruction || '', style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', hint: '', words: wordsIn(blocks[i]) });
       if (!d.ok) throw new Error(d.reason || 'The paragraph could not be revised.');
       blocks[i] = d.text || blocks[i];
       saveBlocks(secId, blocks);
@@ -1058,6 +1063,15 @@
           ${reqRow(true, 'Tables', `${reqTables} table${reqTables === 1 ? '' : 's'} in the text`)}
         </ul></div>`;
 
+    // Bibliography: every reference the transformed sections cite, once, in the chosen style.
+    const refStyleNow = trRefStyle(job);
+    const allRefs = [];
+    secs.forEach(s => ((done[s.id] || {}).references || []).forEach(r => { if (r && r.text && !allRefs.includes(r.text)) allRefs.push(r.text); }));
+    const refsPanel = !allRefs.length ? '' : `<div class="card" style="margin:10px 0;padding:10px 12px">
+        <div style="font-weight:600;margin-bottom:4px">References · ${esc((TR_STYLES.find(x => x[0] === refStyleNow) || [0, refStyleNow])[1])}</div>
+        <p class="muted" style="font-size:13px;margin:0 0 8px">References keep the style they were formatted in. To reformat them in a new style, run Transform now, which rewrites every section.</p>
+        <ol style="list-style:none;padding:0;margin:0;font-size:14px">${sortRefs(allRefs, refStyleNow).map(r => `<li style="margin:0 0 6px 0.5in;text-indent:-0.5in">${mdInline(r)}</li>`).join('')}</ol></div>`;
+
     app.innerHTML = `
       <section class="card" style="margin-top:8px">
         <div class="card-head"><h2 style="margin:0">Step 1 · Article</h2><small>Turn an article into another format, and update it with new literature</small></div>
@@ -1082,6 +1096,7 @@
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
         <label class="field"><span>Modification type <i>required for paragraph changes</i></span><select id="trModType"><option value="">Choose one</option>${['argumentative', 'discussion', 'analytical', 'theory'].map(k => `<option value="${k}"${(job.modType || '') === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
         <label class="field"><span>Writing approach <i>used for every transform and update</i></span><select id="trApproach"><option value="">As in the source</option>${Object.keys(TR_APPROACHES).map(k => `<option value="${k}"${(job.approach || '') === k ? ' selected' : ''}>${TR_APPROACHES[k]}</option>`).join('')}</select></label>
+        <label class="field"><span>Reference style <i>used for new citations and the bibliography</i></span><select id="trStyle">${TR_STYLES.map(([k, l]) => `<option value="${k}"${trRefStyle(job) === k ? ' selected' : ''}>${l}</option>`).join('')}</select></label>
         <fieldset style="border:0;padding:0;margin:0 0 12px"><legend style="font-size:14px;margin-bottom:6px">Default literature sources <i>for new sections</i></legend>
           ${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:14px;font-size:14px"><input type="checkbox" data-src="${k}"${srcTypes.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}
         </fieldset>
@@ -1089,6 +1104,7 @@
         <button class="btn btn-sm" type="button" id="trUpdateAll" style="margin-left:8px">Update all sections with literature</button>
         <div id="trStatus" class="muted" style="font-size:14px;margin:8px 0" aria-live="polite"></div>
         ${reqPanel}
+        ${refsPanel}
         <div style="margin-top:10px">${sectionHtml}</div>
         ${hasOutput ? '<button class="btn" type="button" id="trDown">Download as Word document</button>' : ''}
       </section>`;
@@ -1146,7 +1162,7 @@
         setStatus('Tick sources in Step 2, then transform again.');
         return;
       }
-      const style = (store.get('wr:project', {}) || {}).style || 'apa7';
+      const style = trRefStyle(cur);
       const sectionsList = W2.REPORT_TYPES[t].sections.filter(s => s.id !== 'references');
       const out = Object.assign({}, cur.sections || {});
       const prior = [];
@@ -1198,6 +1214,8 @@
       const cur = store.get(TR_KEY, {}) || {};
       saveJob({ secSrc: Object.assign({}, cur.secSrc || {}, { [sid]: types }) });
     }));
+    const stSel = $('#trStyle');
+    if (stSel) stSel.addEventListener('change', () => saveJob({ style: stSel.value }));
     const apSel = $('#trApproach');
     if (apSel) apSel.addEventListener('change', () => saveJob({ approach: apSel.value }));
     const queryFor = sec => {
@@ -1223,7 +1241,7 @@
       const planned = PL2.buildOutline(t, Math.max(300, Number(cur.words) || 6000), cur.budgets || {}).sections.find(x => x.id === sec.id).words;
       const target = Math.max(planned, before);
       const note = instruction || 'Revise the section to use the new sources listed, keeping its content and structure.';
-      const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
+      const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
       let text = '', refs = [];
       for (let attempt = 0; attempt < 4; attempt++) {
         const have = wordCount(text);
