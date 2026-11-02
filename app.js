@@ -1032,9 +1032,32 @@
     }).join('');
     const hasOutput = secs.some(s => (done[s.id] || {}).text);
 
+    // Step 4: check the transformed output against the requirements the user set.
+    const reqWords = s => String((done[s.id] || {}).text || '').trim().split(/\s+/).filter(Boolean).length;
+    const reqTarget = Math.max(300, Number(job.words) || 6000);
+    const reqTotal = secs.reduce((n, s) => n + reqWords(s), 0);
+    const reqPlanned = s => outline.sections.find(x => x.id === s.id).words;
+    const reqShort = secs.filter(s => reqWords(s) > 0 && reqWords(s) < reqPlanned(s) * 0.85);
+    const reqAllText = secs.map(s => (done[s.id] || {}).text || '').join('\n');
+    const reqTables = (reqAllText.match(/^\s*\|\s*:?-{3,}/gm) || []).length;
+    const reqCites = (reqAllText.match(/\{\{cite:/g) || []).length;
+    const reqRefs = new Set(secs.flatMap(s => ((done[s.id] || {}).references || []).map(r => r.text))).size;
+    const reqPicked = Array.isArray(job.picked) ? job.picked.length : (job.works || []).length;
+    const reqRow = (ok, label, detail) => `<li style="margin:3px 0"><strong style="color:${ok ? 'inherit' : 'var(--warn, #b45309)'}">${ok ? 'OK' : 'Check'}</strong> · ${esc(label)}: ${esc(detail)}</li>`;
+    const reqPanel = !hasOutput ? '' : `<div class="card" style="margin:10px 0;padding:10px 12px">
+        <div style="font-weight:600;margin-bottom:4px">Step 4 · Check requirements</div>
+        <ul style="margin:0;padding-left:18px;font-size:14px">
+          ${reqRow(reqTotal >= reqTarget * 0.85 && reqTotal <= reqTarget * 1.15, 'Total length', `${reqTotal} words against a target of ${reqTarget}`)}
+          ${reqRow(reqShort.length === 0, 'Sections', reqShort.length ? `${reqShort.length} below 85% of planned length: ${reqShort.map(s => s.title).join(', ')}` : 'all sections at planned length')}
+          ${reqRow(reqCites === 0, 'Unresolved citations', reqCites ? `${reqCites} {{cite:}} markers still in the text` : 'none')}
+          ${reqRow(reqRefs > 0, 'References', `${reqRefs} in the reference list`)}
+          ${reqRow(reqPicked > 0, 'Literature used', reqPicked ? `${reqPicked} works ticked for the update` : 'no works ticked; tick sources in Step 2 and update')}
+          ${reqRow(true, 'Tables', `${reqTables} table${reqTables === 1 ? '' : 's'} in the text`)}
+        </ul></div>`;
+
     app.innerHTML = `
       <section class="card" style="margin-top:8px">
-        <div class="card-head"><h2 style="margin:0">Transform an article</h2><small>Turn an article into another format, and update it with new literature</small></div>
+        <div class="card-head"><h2 style="margin:0">Step 1 · Article</h2><small>Turn an article into another format, and update it with new literature</small></div>
         <p class="muted" style="font-size:14px;margin:4px 0 12px">Paste the article text or choose a .txt file. Word and PDF upload is not connected yet, so paste the text from those files for now.</p>
         <label class="field"><span>Article text</span><textarea id="trSource" rows="8" placeholder="Paste the article here">${esc(job.source || '')}</textarea></label>
         <input type="file" id="trFile" accept=".txt,.docx,.pdf,.doc" style="margin:6px 0 12px">
@@ -1044,7 +1067,7 @@
         </div>
       </section>
       <section class="card" style="margin-top:16px">
-        <div class="card-head"><h2 style="margin:0">New literature</h2><small>Search, then tick the works to use</small></div>
+        <div class="card-head"><h2 style="margin:0">Step 2 · Literature</h2><small>Search, then tick the works to use. They are used in Step 3 and Step 4.</small></div>
         <div class="grid two">
           <label class="field"><span>Topic to search</span><input type="text" id="trQuery" value="${esc(job.query || '')}" placeholder="e.g. medical visa policy and patient mobility"></label>
           <label class="field"><span>Published from <i>year, optional</i></span><input type="number" id="trYear" min="1950" max="2026" value="${esc(job.yearFrom || '')}"></label>
@@ -1053,7 +1076,7 @@
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
       </section>
       <section class="card" style="margin-top:16px">
-        <div class="card-head"><h2 style="margin:0">Transform</h2><small>one section at a time, in the target format's order</small></div>
+        <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
         <label class="field"><span>Modification type <i>required for paragraph changes</i></span><select id="trModType"><option value="">Choose one</option>${['argumentative', 'discussion', 'analytical', 'theory'].map(k => `<option value="${k}"${(job.modType || '') === k ? ' selected' : ''}>${k}</option>`).join('')}</select></label>
         <fieldset style="border:0;padding:0;margin:0 0 12px"><legend style="font-size:14px;margin-bottom:6px">Update literature from</legend>
           ${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:14px;font-size:14px"><input type="checkbox" data-src="${k}"${srcTypes.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}
@@ -1061,6 +1084,7 @@
         <button class="btn btn-primary" type="button" id="trGo">Transform now</button>
         <button class="btn btn-sm" type="button" id="trUpdateAll" style="margin-left:8px">Update all sections with literature</button>
         <div id="trStatus" class="muted" style="font-size:14px;margin:8px 0" aria-live="polite"></div>
+        ${reqPanel}
         <div style="margin-top:10px">${sectionHtml}</div>
         ${hasOutput ? '<button class="btn" type="button" id="trDown">Download as Word document</button>' : ''}
       </section>`;
@@ -1114,6 +1138,10 @@
       const target = Math.max(300, Number(cur.words) || 6000);
       const outlineNow = PL2.buildOutline(t, target, cur.budgets || {});
       const chosen = (cur.works || []).filter((_, i) => (Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k)).includes(i));
+      if (!chosen.length && !confirm('No literature is ticked, so the transform will use only the article. Continue without literature?')) {
+        setStatus('Tick sources in Step 2, then transform again.');
+        return;
+      }
       const style = (store.get('wr:project', {}) || {}).style || 'apa7';
       const sectionsList = W2.REPORT_TYPES[t].sections.filter(s => s.id !== 'references');
       const out = Object.assign({}, cur.sections || {});
