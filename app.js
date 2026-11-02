@@ -1024,21 +1024,22 @@
     const paraAction = async (key, mode, instruction) => {
       const [secId, i] = key.split('|');
       const cur = store.get(TR_KEY, {}) || {};
-      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
-      if (!cur.modType) { setStatus('Choose a modification type first.'); return; }
-      if (mode === 'discuss' && !instruction) { setStatus('Write the instruction for the AI first.'); return; }
+      if (!settings().key) { noteFor(secId, 'Add your access key in Settings first.'); return; }
+      if (!cur.modType) { noteFor(secId, 'Choose a modification type in Step 3 first.'); return; }
+      if (mode === 'discuss' && !instruction) { noteFor(secId, 'Write the instruction for the AI first.'); return; }
       try {
-        setStatus('Revising the paragraph…');
+        noteFor(secId, 'Revising the paragraph…');
         await paraRevise(secId, Number(i), mode, instruction);
         renderTransform();
-        setStatus('Paragraph updated.');
-      } catch (e) { setStatus(e.message); }
+        noteFor(secId, 'Paragraph updated.');
+      } catch (e) { noteFor(secId, e.message); }
     };
 
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
       const secPicks = (job.secSrc || {})[s.id] || srcTypes;
       return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
+        <div class="muted" data-sec-note="${esc(s.id)}" style="font-size:13px;min-height:1em;margin:4px 0"></div>
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
         ${text ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
@@ -1122,6 +1123,8 @@
       </section>`;
 
     const setStatus = t => { const el = $('#trStatus'); if (el) el.textContent = t; };
+    // Messages for one section appear beside its own buttons as well as in the status line.
+    const noteFor = (secId, t) => { const el = app.querySelector(`[data-sec-note="${secId}"]`); if (el) el.textContent = t; setStatus(t); };
     const saveJob = patch => { store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch)); };
 
     $('#trSource').addEventListener('change', e => saveJob({ source: e.target.value }));
@@ -1287,7 +1290,7 @@
         saveJob({ found: all, foundPicks: picks });
         renderTransform();
         setStatus(`${found.length} sources found for “${sec.title}”. Tick the ones to use, then update.`);
-      } catch (e) { setStatus(e.message || 'The literature search failed.'); }
+      } catch (e) { noteFor(sec.id, e.message || 'The literature search failed.'); }
     }));
     app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
       const [sid, idx] = c.dataset.trFpick.split(':');
@@ -1302,24 +1305,24 @@
       const cur = store.get(TR_KEY, {}) || {};
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
       const works = found.filter((_, i) => picks.includes(i));
-      if (!works.length) { setStatus('Find literature first, then tick the sources to use.'); return; }
+      if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       try {
         setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
         await reviseSection(sec, UPDATE_NOTE, works);
         renderTransform();
-        setStatus(`“${sec.title}” updated with new literature.`);
-      } catch (e) { setStatus(e.message); }
+        noteFor(sec.id, `“${sec.title}” updated with new literature.`);
+      } catch (e) { noteFor(sec.id, e.message); }
     }));
     app.querySelectorAll('[data-tr-modify]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trModify);
       const instr = ((app.querySelector(`textarea[data-tr-instr="${sec.id}"]`) || {}).value || '').trim();
-      if (!instr) { setStatus('Write the instruction for this section first.'); return; }
+      if (!instr) { noteFor(sec.id, 'Write the instruction for this section first.'); return; }
       try {
         setStatus(`Modifying “${sec.title}”…`);
         await reviseSection(sec, instr, []);
         renderTransform();
-        setStatus(`“${sec.title}” modified.`);
-      } catch (e) { setStatus(e.message); }
+        noteFor(sec.id, `“${sec.title}” modified.`);
+      } catch (e) { noteFor(sec.id, e.message); }
     }));
     const updAll = $('#trUpdateAll');
     if (updAll) updAll.addEventListener('click', async () => {
