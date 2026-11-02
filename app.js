@@ -767,6 +767,11 @@
   const TR_SRC_LABELS = { articles: 'Articles', reports: 'Reports', gov: 'Government and research institutes', other: 'Other reliable repositories' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
+  // Drops titles that are only a section name or too short to be a real work (e.g. "Introduction", "Predgovor").
+  function usableTitle(title) {
+    const t = String(title || '').trim();
+    return t.split(/\s+/).length >= 4 && !/^(introduction|preface|foreword|predgovor|contents|index|editorial|prologue|epilogue)$/i.test(t.replace(/[.:]+$/, ''));
+  }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -783,7 +788,7 @@
       authorships: (it.author || []).map(a => ({ author: { display_name: [a.given, a.family].filter(Boolean).join(' ') }, institutions: [] })),
       primary_location: { source: { display_name: (it['container-title'] || [''])[0] } },
       type: 'journal-article', cited_by_count: it['is-referenced-by-count'] || 0, abstract_inverted_index: null, is_retracted: false
-    })).filter(w => w.title);
+    })).filter(w => usableTitle(w.title));
   }
   async function europePmcSearch(query, year) {
     const q = year ? `${query} AND PUB_YEAR:[${year} TO 2100]` : query;
@@ -794,7 +799,7 @@
       authorships: String(r.authorString || '').split(',').map(s => s.trim()).filter(Boolean).map(n => ({ author: { display_name: n }, institutions: [] })),
       primary_location: { source: { display_name: r.journalTitle || 'Europe PMC' } },
       type: 'article', cited_by_count: r.citedByCount || 0, abstract_inverted_index: null, is_retracted: false
-    })).filter(w => w.title);
+    })).filter(w => usableTitle(w.title));
   }
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
@@ -802,7 +807,7 @@
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
       const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
-      let res = (d.results || []).filter(w => !w.is_retracted);
+      let res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
       if (t === 'gov') res = res.filter(isTrustedWork);
       if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
       if (t === 'other') res = res.concat(await europePmcSearch(query, year).catch(() => []));
@@ -1156,7 +1161,7 @@
     const srcChosen = () => [...app.querySelectorAll('input[data-src]')].filter(c => c.checked).map(c => c.dataset.src);
     app.querySelectorAll('input[data-src]').forEach(c => c.addEventListener('change', () => saveJob({ srcTypes: srcChosen() })));
     const queryFor = sec => (store.get(TR_KEY, {}) || {}).query || sec.title;
-    const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key.';
+    const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part.';
     const findFor = async sec => {
       const types = srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source above.');
@@ -1169,6 +1174,9 @@
       const words = Math.max(300, existing.trim().split(/\s+/).filter(Boolean).length);
       const d = await apiPostForm(WRITE_PATH, { action: 'transform', type: cur.type || 'empirical:q1', section: sec.id, words, source: cur.source || existing, works: JSON.stringify(works || []), style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', existing, instruction });
       if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
+      const before = existing.trim().split(/\s+/).filter(Boolean).length;
+      const after = String(d.text || '').trim().split(/\s+/).filter(Boolean).length;
+      if (existing && after < before * 0.85) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
       sections[sec.id] = { text: d.text || existing, references: mergeRefs((sections[sec.id] || {}).references, d.references) };
       saveJob({ sections });
     };
