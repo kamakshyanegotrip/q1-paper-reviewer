@@ -187,7 +187,7 @@
 
   // The prompt that rewrites the source article into one section of the target format.
   // The target format's section list is given so the section fits the whole document.
-  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '' }) {
+  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '', instruction = '' }) {
     const t = T.REPORT_TYPES[type] || { label: 'document', sections: [] };
     const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '' };
     const plan = sectionsOf(type).filter(x => x.id !== 'references').map(x => `- ${x.title}${x.fixed != null ? ' (fixed length)' : ''}`).join('\n');
@@ -206,7 +206,11 @@
       '- Use markdown: "#" for the chapter or section title, "##" for its subsections, "###" for sub-subsections. Use "**bold**" and "*italic*" only where the source uses them.',
       '- Write in formal academic English.'
     ];
-    if (existing && String(existing).trim()) {
+    if (instruction && String(existing).trim()) {
+      lines.push(`Revise the section below as instructed: ${String(instruction).slice(0, 1000)}`);
+      lines.push('Keep the section\'s content, structure and citation keys unless the instruction says otherwise. Where new sources are listed, integrate the relevant ones and cite each new claim with {{cite:KEY}}. Output the complete revised section only.');
+      lines.push(`Section to revise (about ${countWords(existing)} words now; aim for about ${words} words):\n${clip(String(existing), 30000)}`);
+    } else if (existing && String(existing).trim()) {
       lines.push(`The section below is already written but is about ${countWords(existing)} words short of the target. Continue it: write about ${words} more words that extend the section with material from the source that is not yet covered. Do not repeat what is written, do not restart the title, and do not write a conclusion for the whole document. Output only the new text.`);
       lines.push(`Section written so far:\n${clip(String(existing), 30000)}`);
     }

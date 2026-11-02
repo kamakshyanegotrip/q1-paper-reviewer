@@ -763,6 +763,30 @@
   const TR_SELECT = 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted';
   const workLine = w => { const au = (w.authorships || [])[0]; const who = au && au.author ? au.author.display_name : 'Unknown author'; return `${w.title || 'Untitled'} (${who}, ${w.publication_year || 'n.d.'})`; };
 
+  // Literature sources for Transform. OpenAlex filters by work type; government and research bodies are kept only if they are on the trusted list.
+  const TR_SRC_LABELS = { articles: 'Articles', reports: 'Reports', gov: 'Government and research institutes', other: 'Other reliable repositories' };
+  const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
+  const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
+  function isTrustedWork(w) {
+    const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
+    (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
+    const hay = names.join(' | ').toLowerCase();
+    return TR_TRUSTED.some(t => hay.includes(t));
+  }
+  async function findLiterature(query, srcTypes, year) {
+    const seen = new Set(), out = [];
+    for (const t of srcTypes) {
+      const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
+      const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
+      const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
+      let res = (d.results || []).filter(w => !w.is_retracted);
+      if (t === 'gov') res = res.filter(isTrustedWork);
+      res.slice(0, 8).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
+    }
+    return out;
+  }
+  const mergeRefs = (a = [], b = []) => { const out = [...a]; b.forEach(r => { if (!out.some(q => q.text === r.text)) out.push(r); }); return out; };
+
   // Reads an uploaded article (.txt, .docx, .pdf) into plain text. Libraries load on first use.
   const TR_LIBS = {
     mammoth: 'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js',
@@ -880,10 +904,27 @@
     const outline = PL2.buildOutline(type, job.words || 6000, job.budgets || {});
     const secs = W2.REPORT_TYPES[type].sections.filter(s => s.id !== 'references');
     const done = job.sections || {};
+    const srcTypes = Array.isArray(job.srcTypes) ? job.srcTypes : ['articles', 'reports', 'gov'];
+    const foundAll = job.found || {};
+    const foundPicks = job.foundPicks || {};
+    const foundHtml = secId => {
+      const list = foundAll[secId] || [];
+      if (!list.length) return '';
+      const picks = foundPicks[secId] || [];
+      return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`).join('')}</div>`;
+    };
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
       return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
-        ${text ? `<textarea rows="8" data-tr-edit="${esc(s.id)}" style="width:100%">${esc(text)}</textarea>` : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}</article>`;
+        ${text ? `<textarea rows="8" data-tr-edit="${esc(s.id)}" style="width:100%">${esc(text)}</textarea>` : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
+        ${text ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+          <button class="btn btn-sm" type="button" data-tr-find="${esc(s.id)}">Find literature</button>
+          <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
+        </div>
+        <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
+        <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
+          <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
+        <button class="btn btn-sm" type="button" data-tr-modify="${esc(s.id)}">Modify this section</button>` : ''}</article>`;
     }).join('');
     const hasOutput = secs.some(s => (done[s.id] || {}).text);
 
@@ -909,7 +950,11 @@
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Transform</h2><small>one section at a time, in the target format's order</small></div>
+        <fieldset style="border:0;padding:0;margin:0 0 12px"><legend style="font-size:14px;margin-bottom:6px">Update literature from</legend>
+          ${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:14px;font-size:14px"><input type="checkbox" data-src="${k}"${srcTypes.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}
+        </fieldset>
         <button class="btn btn-primary" type="button" id="trGo">Transform now</button>
+        <button class="btn btn-sm" type="button" id="trUpdateAll" style="margin-left:8px">Update all sections with literature</button>
         <div id="trStatus" class="muted" style="font-size:14px;margin:8px 0" aria-live="polite"></div>
         <div style="margin-top:10px">${sectionHtml}</div>
         ${hasOutput ? '<button class="btn" type="button" id="trDown">Download as Word document</button>' : ''}
@@ -1006,6 +1051,88 @@
       sections[t.dataset.trEdit] = Object.assign({}, sections[t.dataset.trEdit] || {}, { text: t.value });
       saveJob({ sections });
     }));
+
+    // ---- literature and modification controls on each transformed section ----
+    const srcChosen = () => [...app.querySelectorAll('input[data-src]')].filter(c => c.checked).map(c => c.dataset.src);
+    app.querySelectorAll('input[data-src]').forEach(c => c.addEventListener('change', () => saveJob({ srcTypes: srcChosen() })));
+    const queryFor = sec => (store.get(TR_KEY, {}) || {}).query || sec.title;
+    const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key.';
+    const findFor = async sec => {
+      const types = srcChosen();
+      if (!types.length) throw new Error('Choose at least one literature source above.');
+      return findLiterature(queryFor(sec), types, (store.get(TR_KEY, {}) || {}).yearFrom || '');
+    };
+    const reviseSection = async (sec, instruction, works) => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const sections = Object.assign({}, cur.sections || {});
+      const existing = (sections[sec.id] || {}).text || '';
+      const words = Math.max(300, existing.trim().split(/\s+/).filter(Boolean).length);
+      const d = await apiPostForm(WRITE_PATH, { action: 'transform', type: cur.type || 'empirical:q1', section: sec.id, words, source: cur.source || existing, works: JSON.stringify(works || []), style: (store.get('wr:project', {}) || {}).style || 'apa7', project: JSON.stringify({ title: cur.title || '' }), prior: '[]', existing, instruction });
+      if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
+      sections[sec.id] = { text: d.text || existing, references: mergeRefs((sections[sec.id] || {}).references, d.references) };
+      saveJob({ sections });
+    };
+    app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
+      const sec = secs.find(x => x.id === b.dataset.trFind);
+      try {
+        setStatus(`Finding literature for “${sec.title}”…`);
+        const found = await findFor(sec);
+        const cur = store.get(TR_KEY, {}) || {};
+        const all = Object.assign({}, cur.found || {}), picks = Object.assign({}, cur.foundPicks || {});
+        all[sec.id] = found; picks[sec.id] = found.slice(0, 5).map((_, i) => i);
+        saveJob({ found: all, foundPicks: picks });
+        renderTransform();
+        setStatus(`${found.length} sources found for “${sec.title}”. Tick the ones to use, then update.`);
+      } catch (e) { setStatus(e.message || 'The literature search failed.'); }
+    }));
+    app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
+      const [sid, idx] = c.dataset.trFpick.split(':');
+      const cur = store.get(TR_KEY, {}) || {};
+      const set = new Set((cur.foundPicks || {})[sid] || []);
+      c.checked ? set.add(Number(idx)) : set.delete(Number(idx));
+      const fp = Object.assign({}, cur.foundPicks || {}); fp[sid] = [...set].sort((a, b) => a - b);
+      saveJob({ foundPicks: fp });
+    }));
+    app.querySelectorAll('[data-tr-apply]').forEach(b => b.addEventListener('click', async () => {
+      const sec = secs.find(x => x.id === b.dataset.trApply);
+      const cur = store.get(TR_KEY, {}) || {};
+      const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
+      const works = found.filter((_, i) => picks.includes(i));
+      if (!works.length) { setStatus('Find literature first, then tick the sources to use.'); return; }
+      try {
+        setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
+        await reviseSection(sec, UPDATE_NOTE, works);
+        renderTransform();
+        setStatus(`“${sec.title}” updated with new literature.`);
+      } catch (e) { setStatus(e.message); }
+    }));
+    app.querySelectorAll('[data-tr-modify]').forEach(b => b.addEventListener('click', async () => {
+      const sec = secs.find(x => x.id === b.dataset.trModify);
+      const instr = ((app.querySelector(`textarea[data-tr-instr="${sec.id}"]`) || {}).value || '').trim();
+      if (!instr) { setStatus('Write the instruction for this section first.'); return; }
+      try {
+        setStatus(`Modifying “${sec.title}”…`);
+        await reviseSection(sec, instr, []);
+        renderTransform();
+        setStatus(`“${sec.title}” modified.`);
+      } catch (e) { setStatus(e.message); }
+    }));
+    const updAll = $('#trUpdateAll');
+    if (updAll) updAll.addEventListener('click', async () => {
+      if (!settings().key) { setStatus('Add your access key in Settings first.'); return; }
+      const start = store.get(TR_KEY, {}) || {};
+      for (const sec of secs) {
+        if (!((start.sections || {})[sec.id] || {}).text) continue;
+        try {
+          setStatus(`Finding literature for “${sec.title}”…`);
+          const found = await findFor(sec);
+          const works = found.slice(0, 5);
+          if (works.length) { setStatus(`Updating “${sec.title}” with ${works.length} sources…`); await reviseSection(sec, UPDATE_NOTE, works); }
+        } catch (e) { setStatus(`Stopped at “${sec.title}”: ${e.message}`); renderTransform(); return; }
+      }
+      setStatus('All sections updated with literature. Check each section, then download.');
+      renderTransform();
+    });
 
     const dl = $('#trDown');
     if (dl) dl.addEventListener('click', () => {
