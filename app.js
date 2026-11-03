@@ -1337,6 +1337,7 @@
     // Works whose title already appears in the article are its own citations, so they are left out.
     const normText = x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part. Write only this section: do not write or repeat any other chapter or heading.';
+    let lastFind = null;   // counts from the last search, shown to the user
     const findFor = async sec => {
       const types = ((store.get(TR_KEY, {}) || {}).secSrc || {})[sec.id] || srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source for this section.');
@@ -1356,9 +1357,16 @@
       // Validation: keep a work only if its title or abstract mentions one of the section's keywords (or topic terms),
       // and drop front-matter titles. Crossref and Europe PMC results skip the title check inside findLiterature, so it runs here for all sources.
       const terms = (kws.length ? kws : [queryFor(sec) || '']).map(k => normText(k)).filter(t => t.length >= 4);
-      const blobOf = w => normText(`${w.title || ''} ${abstractOf(w)}`);
-      const relevant = w => !terms.length || terms.some(t => blobOf(w).includes(t));
-      return found.filter(w => usableTitle(w.title) && relevant(w) && !(normText(w.title).length >= 20 && articleText.includes(normText(w.title))));
+      const escRe = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const hitRes = terms.map(t => new RegExp('(^|[^a-z0-9])' + escRe(t) + '($|[^a-z0-9])'));
+      const relevant = w => {
+        if (!hitRes.length) return true;
+        const title = normText(w.title || ''), abs = normText(abstractOf(w));
+        return hitRes.some(re => re.test(title) || re.test(abs));
+      };
+      const kept = found.filter(w => usableTitle(w.title) && relevant(w) && !(normText(w.title).length >= 20 && articleText.includes(normText(w.title))));
+      lastFind = { raw: found.length, kept: kept.length };
+      return kept;
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
     // until it reaches its planned length. The section is kept as it was if the result is still too short.
@@ -1407,7 +1415,9 @@
         all[sec.id] = found; picks[sec.id] = found.slice(0, 5).map((_, i) => i);
         saveJob({ found: all, foundPicks: picks });
         renderTransform();
-        setStatus(`${found.length} sources found for “${sec.title}”. Tick the ones to use, then update.`);
+        const st = lastFind || { raw: found.length, kept: found.length };
+        if (!found.length) noteFor(sec.id, `No relevant works found (${st.raw} results checked, none mention your keywords). Try different keywords.`);
+        else setStatus(`${found.length} relevant works kept for “${sec.title}” (${st.raw - found.length} unrelated removed). Tick the ones to use, then update.`);
       } catch (e) { noteFor(sec.id, e.message || 'The literature search failed.'); }
     }));
     app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
