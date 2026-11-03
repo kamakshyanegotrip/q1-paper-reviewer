@@ -979,9 +979,9 @@
       return lead + mdToHtml(String(sec.text).replace(/\{\{cite:([^}]+)\}\}/g, (_, k) => citeOf(k.trim())), style);
     }).join('\n');
     const titlePage = `<p style="text-align:center;font-size:20pt;font-weight:bold;margin-top:120pt">${esc(title)}</p><p style="text-align:center;margin-top:12pt">${esc(type.label)}</p>`;
-    const refsHtml = refs.length
-      ? `<h1 style="${style.h2}">References</h1>` + sortRefs(refs, trRefStyle(cur)).map(r => `<p style="margin:0 0 6pt 0.5in;text-indent:-0.5in">${mdInline(r)}</p>`).join('')
-      : '';
+    const refsHtml = `<h1 style="${style.h2}">References</h1>` + (refs.length
+      ? sortRefs(refs, trRefStyle(cur)).map(r => `<p style="margin:0 0 6pt 0.5in;text-indent:-0.5in">${mdInline(r)}</p>`).join('')
+      : '<p style="margin:0">No references were recorded for this draft. Tick sources in Step 2 and run Transform again.</p>');
     return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{${style.body}}</style></head><body>${titlePage}${body}${refsHtml}</body></html>`;
   }
 
@@ -1196,7 +1196,7 @@
       const target = Math.max(300, Number(cur.words) || 6000);
       const outlineNow = PL2.buildOutline(t, target, cur.budgets || {});
       const chosen = (cur.works || []).filter((_, i) => (Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k)).includes(i));
-      if (!chosen.length && !confirm('No literature is ticked, so the transform will use only the article. Continue without literature?')) {
+      if (!srcChosen().length && !confirm('No literature sources are ticked, so the transform will use only the article. Continue without literature?')) {
         setStatus('Tick sources in Step 2, then transform again.');
         return;
       }
@@ -1211,12 +1211,21 @@
           const planned = outlineNow.sections.find(x => x.id === s.id).words;
           const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
           let text = '', refs = [];
+          // Each section uses its own sources: the works picked for it, or a search of its own topic.
+          let secWorks = [];
+          const secFound = (cur.found || {})[s.id] || [];
+          const secPick = (cur.foundPicks || {})[s.id] || [];
+          if (secFound.length && secPick.length) secWorks = secFound.filter((_, k) => secPick.includes(k));
+          else {
+            try { setStatus(`Finding literature for “${s.title}”…`); secWorks = (await findFor(s)).slice(0, 6); }
+            catch (e) { secWorks = []; }
+          }
           for (let attempt = 0; attempt < 6; attempt++) {
             const have = wordCount(text);
             if (attempt > 0 && have >= planned * 0.85) break;
             const need = attempt === 0 ? planned : Math.max(300, planned - have);
             setStatus(`Transforming “${s.title}”: ${have} of ${planned} words so far…`);
-            const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(chosen), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing: text, approach: cur.approach || '' };
+            const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(secWorks), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing: text, approach: cur.approach || '' };
             const d = await apiPostForm(WRITE_PATH, params);
             if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be transformed.'); break; }
             if (!String(d.text || '').trim()) break;
