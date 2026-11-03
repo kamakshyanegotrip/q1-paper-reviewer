@@ -1360,11 +1360,13 @@
       const target = Math.max(planned, before);
       const note = instruction || 'Revise the section to use the new sources listed, keeping its content and structure.';
       const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
+      // Progress shows beside this section's buttons, not only in the status line at the top of the panel.
+      const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
       let text = '', refs = [];
       for (let attempt = 0; attempt < 4; attempt++) {
         const have = wordCount(text);
         if (attempt > 0 && have >= target) break;
-        setStatus(`Updating “${sec.title}”: ${have} of ${target} words so far…`);
+        say(`Updating: ${have} of ${target} words so far (attempt ${attempt + 1} of 4). This can take a minute.`);
         const first = attempt === 0;
         const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, {
           words: first ? target : Math.max(300, target - have),
@@ -1433,12 +1435,17 @@
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
       const works = fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
+      if (b.disabled) return;
+      b.disabled = true; b.textContent = 'Updating…';
       try {
-        setStatus(`Updating “${sec.title}” with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources…`);
+        noteFor(sec.id, `Updating with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources. This can take a minute.`);
         await reviseSection(sec, UPDATE_NOTE, works);
         renderTransform();
         noteFor(sec.id, `“${sec.title}” updated with new literature.`);
-      } catch (e) { noteFor(sec.id, e.message); }
+      } catch (e) {
+        b.disabled = false; b.textContent = 'Update with selected sources';
+        noteFor(sec.id, 'Not updated: ' + e.message);
+      }
     }));
     app.querySelectorAll('[data-tr-modify]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trModify);
