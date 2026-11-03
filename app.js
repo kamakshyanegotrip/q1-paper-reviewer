@@ -800,6 +800,8 @@
     });
     return (cut < 0 ? lines : lines.slice(0, cut)).join('\n').trim();
   };
+  // Keywords: each one is searched separately. Scope 'global' is the whole article; otherwise it is a section id.
+  const kwBox = (scope, list) => `<div style="margin:8px 0"><div style="display:flex;flex-wrap:wrap;gap:4px">${list.map((k, i) => `<span style="border:1px solid #d8d2c4;border-radius:12px;padding:2px 8px;font-size:13px">${esc(k)} <button type="button" data-kw-remove="${esc(scope)}|${i}" style="border:0;background:none;cursor:pointer" aria-label="Remove keyword">×</button></span>`).join('')}</div><div style="display:flex;gap:6px;margin-top:4px"><input type="text" data-kw-input="${esc(scope)}" placeholder="Keyword, e.g. visa policy (commas for several)" style="flex:1"><button class="btn btn-sm" type="button" data-kw-include="${esc(scope)}">Include</button></div></div>`;
   const TR_APPROACHES = { informative: 'Informative', analytical: 'Analytical', argumentative: 'Argumentative', descriptive: 'Descriptive', detailed: 'Detailed' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
@@ -1075,6 +1077,7 @@
         <div class="muted" data-sec-note="${esc(s.id)}" style="font-size:13px;min-height:1em;margin:4px 0"></div>
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
+        ${text ? `<div style="font-size:13px;margin-top:6px">Keywords for this section</div>${kwBox(s.id, ((job.secKeywords || {})[s.id]) || [])}` : ''}
         ${text ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
           <button class="btn btn-sm" type="button" data-tr-find="${esc(s.id)}">Find literature</button>
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
@@ -1135,6 +1138,7 @@
           <label class="field"><span>Topic to search</span><input type="text" id="trQuery" value="${esc(job.query || '')}" placeholder="e.g. medical visa policy and patient mobility"></label>
           <label class="field"><span>Published from <i>year, optional</i></span><input type="number" id="trYear" min="1950" max="2026" value="${esc(job.yearFrom || '')}"></label>
         </div>
+        <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
       </section>
@@ -1206,7 +1210,8 @@
       const target = Math.max(300, Number(cur.words) || 6000);
       const outlineNow = PL2.buildOutline(t, target, cur.budgets || {});
       const chosen = (cur.works || []).filter((_, i) => (Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k)).includes(i));
-      if (!String(cur.query || '').trim() && !confirm('No topic is typed in Step 2, so no new literature will be searched. Continue without new literature?')) {
+      const hasKeywords = (cur.keywords || []).length || Object.values(cur.secKeywords || {}).some(x => x && x.length);
+      if (!String(cur.query || '').trim() && !hasKeywords && !confirm('No topic is typed in Step 2, so no new literature will be searched. Continue without new literature?')) {
         setStatus('Type a topic in Step 2, then transform again.');
         return;
       }
@@ -1291,10 +1296,19 @@
     const findFor = async sec => {
       const types = ((store.get(TR_KEY, {}) || {}).secSrc || {})[sec.id] || srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source for this section.');
-      const q = queryFor(sec);
-      if (!q) throw new Error('Type a topic in Step 2 first, so the search finds new literature.');
-      const articleText = normText((store.get(TR_KEY, {}) || {}).source || '');
-      const found = await findLiterature(q, types, (store.get(TR_KEY, {}) || {}).yearFrom || '');
+      const cur2 = store.get(TR_KEY, {}) || {};
+      const kws = ((cur2.secKeywords || {})[sec.id] || []).length ? cur2.secKeywords[sec.id] : (cur2.keywords || []);
+      const year = cur2.yearFrom || '';
+      let found = [];
+      if (kws.length) { for (const kw of kws) found = found.concat(await findLiterature(kw, types, year)); }
+      else {
+        const q = queryFor(sec);
+        if (!q) throw new Error('Type a topic or keywords in Step 2 first, so the search finds new literature.');
+        found = await findLiterature(q, types, year);
+      }
+      const seenWorks = new Set();
+      found = found.filter(w => { const k = w.id || normText(w.title); if (seenWorks.has(k)) return false; seenWorks.add(k); return true; });
+      const articleText = normText(cur2.source || '');
       return found.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
@@ -1376,6 +1390,19 @@
         renderTransform();
         noteFor(sec.id, `“${sec.title}” modified.`);
       } catch (e) { noteFor(sec.id, e.message); }
+    }));
+    // Keywords: Include adds the typed keywords to the article (Step 2) or to one section; × removes one.
+    const kwGet = scope => { const c = store.get(TR_KEY, {}) || {}; return scope === 'global' ? (c.keywords || []) : ((c.secKeywords || {})[scope] || []); };
+    const kwSet = (scope, list) => { const c = store.get(TR_KEY, {}) || {}; if (scope === 'global') saveJob({ keywords: list }); else saveJob({ secKeywords: Object.assign({}, c.secKeywords || {}, { [scope]: list }) }); renderTransform(); };
+    app.querySelectorAll('[data-kw-include]').forEach(b => b.addEventListener('click', () => {
+      const scope = b.dataset.kwInclude;
+      const typed = String(((app.querySelector(`input[data-kw-input="${scope}"]`) || {}).value) || '').split(',').map(x => x.trim()).filter(Boolean);
+      if (!typed.length) { setStatus('Type a keyword first.'); return; }
+      kwSet(scope, [...new Set([...kwGet(scope), ...typed])]);
+    }));
+    app.querySelectorAll('[data-kw-remove]').forEach(b => b.addEventListener('click', () => {
+      const [scope, i] = b.dataset.kwRemove.split('|');
+      const list = kwGet(scope).slice(); list.splice(Number(i), 1); kwSet(scope, list);
     }));
     const updAll = $('#trUpdateAll');
     if (updAll) updAll.addEventListener('click', async () => {
