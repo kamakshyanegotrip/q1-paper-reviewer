@@ -801,7 +801,7 @@
     return (cut < 0 ? lines : lines.slice(0, cut)).join('\n').trim();
   };
   // Keywords: each one is searched separately. Scope 'global' is the whole article; otherwise it is a section id.
-  const kwBox = (scope, list) => `<div style="margin:8px 0"><div style="display:flex;flex-wrap:wrap;gap:4px">${list.map((k, i) => `<span style="border:1px solid #d8d2c4;border-radius:12px;padding:2px 8px;font-size:13px">${esc(k)} <button type="button" data-kw-remove="${esc(scope)}|${i}" style="border:0;background:none;cursor:pointer" aria-label="Remove keyword">×</button></span>`).join('')}</div><div style="display:flex;gap:6px;margin-top:4px"><input type="text" data-kw-input="${esc(scope)}" placeholder="Keyword, e.g. visa policy (commas for several)" style="flex:1"><button class="btn btn-sm" type="button" data-kw-include="${esc(scope)}">Include</button></div></div>`;
+  const kwBox = (scope, list) => `<div style="margin:8px 0"><div style="display:flex;flex-wrap:wrap;gap:4px">${list.map((k, i) => `<span style="border:1px solid #d8d2c4;border-radius:12px;padding:2px 8px;font-size:13px">${esc(k)} <button type="button" data-kw-remove="${esc(scope)}|${i}" style="border:0;background:none;cursor:pointer" aria-label="Remove keyword">×</button></span>`).join('')}</div><div style="display:flex;gap:6px;margin-top:4px"><input type="text" data-kw-input="${esc(scope)}" placeholder="Keyword, e.g. visa policy (commas for several)" style="flex:1"><button class="btn btn-sm" type="button" data-kw-include="${esc(scope)}">Add keyword</button></div></div>`;
   const TR_APPROACHES = { informative: 'Informative', analytical: 'Analytical', argumentative: 'Argumentative', descriptive: 'Descriptive', detailed: 'Detailed' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
@@ -1083,6 +1083,7 @@
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
         </div>
         <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
+        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
         <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
           <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
         <button class="btn btn-sm" type="button" data-tr-modify="${esc(s.id)}">Modify this section</button>` : ''}</article>`;
@@ -1141,6 +1142,7 @@
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
+        ${works.length ? `<button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px">Include selected literature (${picked.length})</button>` : ''}
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
@@ -1179,19 +1181,33 @@
 
     // Literature: searched in the browser (OpenAlex is open to browsers); the works you tick are sent with the transform.
     $('#trSearch').addEventListener('click', async () => {
-      const q = $('#trQuery').value.trim();
-      if (!q) { setStatus('Enter a topic to search.'); return; }
+      const cur = store.get(TR_KEY, {}) || {};
+      const topic = $('#trQuery').value.trim();
+      const queries = (cur.keywords || []).length ? cur.keywords : (topic ? [topic] : []);
+      if (!queries.length) { setStatus('Type a topic or add keywords first.'); return; }
+      const types = srcChosen();
+      if (!types.length) { setStatus('Tick at least one source type first.'); return; }
       const year = $('#trYear').value.trim();
-      const params = new URLSearchParams({ search: q, 'per-page': '25', select: TR_SELECT });
-      if (year) params.set('filter', `from_publication_date:${year}-01-01`);
       setStatus('Searching new literature…');
       try {
-        const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
-        const results = (d.results || []).filter(w => !w.is_retracted);
-        saveJob({ query: q, yearFrom: year, works: results, picked: results.map((_, i) => i) });
+        let results = [];
+        for (const q of queries) results = results.concat(await findLiterature(q, types, year));
+        const seen = new Set();
+        results = results.filter(w => { const k = w.id || normText(w.title); if (seen.has(k)) return false; seen.add(k); return true; });
+        const articleText = normText(cur.source || '');
+        results = results.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
+        saveJob({ query: topic, yearFrom: year, works: results, picked: [] });
         renderTransform();
-        setStatus(`${results.length} works found. Tick the ones to use.`);
+        setStatus(`${results.length} works found. Tick the ones to include, then click Include selected literature.`);
       } catch (e) { setStatus('The literature search could not be reached. Try again.'); }
+    });
+    const trInc = $('#trInclude');
+    if (trInc) trInc.addEventListener('click', () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const pk = Array.isArray(cur.picked) ? cur.picked : [];
+      saveJob({ included: (cur.works || []).filter((_, i) => pk.includes(i)) });
+      renderTransform();
+      setStatus(`${pk.length} works included for Transform and updates.`);
     });
     app.querySelectorAll('input[data-pick]').forEach(c => c.addEventListener('change', () => {
       const cur = store.get(TR_KEY, {}) || {};
@@ -1234,7 +1250,9 @@
           let secWorks = [];
           const secFound = (cur.found || {})[s.id] || [];
           const secPick = (cur.foundPicks || {})[s.id] || [];
-          if (secFound.length && secPick.length) secWorks = secFound.filter((_, k) => secPick.includes(k));
+          if (((cur.secIncluded || {})[s.id] || []).length) secWorks = cur.secIncluded[s.id];
+          else if (secFound.length && secPick.length) secWorks = secFound.filter((_, k) => secPick.includes(k));
+          else if ((cur.included || []).length) secWorks = cur.included;
           else {
             try { setStatus(`Finding literature for “${s.title}”…`); secWorks = (await findFor(s)).slice(0, 6); }
             catch (e) { secWorks = []; }
@@ -1367,11 +1385,19 @@
       const fp = Object.assign({}, cur.foundPicks || {}); fp[sid] = [...set].sort((a, b) => a - b);
       saveJob({ foundPicks: fp });
     }));
+    app.querySelectorAll('[data-tr-include]').forEach(b => b.addEventListener('click', () => {
+      const sid = b.dataset.trInclude;
+      const cur = store.get(TR_KEY, {}) || {};
+      const list = (cur.found || {})[sid] || [], pk = (cur.foundPicks || {})[sid] || [];
+      const inc = Object.assign({}, cur.secIncluded || {}, { [sid]: list.filter((_, i) => pk.includes(i)) });
+      saveJob({ secIncluded: inc });
+      noteFor(sid, `${inc[sid].length} works included for this section.`);
+    }));
     app.querySelectorAll('[data-tr-apply]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trApply);
       const cur = store.get(TR_KEY, {}) || {};
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
-      const works = found.filter((_, i) => picks.includes(i));
+      const works = ((cur.secIncluded || {})[sec.id] || []).length ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       try {
         setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
@@ -1413,7 +1439,8 @@
         if (!((start.sections || {})[sec.id] || {}).text) continue;
         try {
           setStatus(`Finding literature for “${sec.title}”…`);
-          const works = (await findFor(sec)).slice(0, 5);
+          const incl = (((store.get(TR_KEY, {}) || {}).secIncluded || {})[sec.id] || []);
+          const works = incl.length ? incl : (await findFor(sec)).slice(0, 5);
           if (!works.length) { report.push(`${sec.title}: no sources found`); continue; }
           setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
           await reviseSection(sec, UPDATE_NOTE, works);
