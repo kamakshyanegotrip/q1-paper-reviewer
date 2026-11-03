@@ -134,3 +134,11 @@ test('a transform prompt gives the source, the target structure and the sources 
   assert.match(p, /\{\{cite:KEY\}\}/);
   assert.match(p, /about 800 words/);
 });
+
+test('a transform keeps the article in-text citations even when no new sources are listed', () => {
+  const p = P.buildTransformPrompt({ type: 'book:authored', section: 'chapter_1', words: 800, source: 'Visa rules shape demand (Lee, 2024).', prior: [], sourcesText: '', project: {}, style: 'apa7' });
+  assert.match(p, /Keep every in-text citation the source article already contains/);
+  assert.match(p, /APA 7 style/);
+  assert.match(p, /Add no new citations/);
+  assert.doesNotMatch(p, /Write no \{\{cite:…\}\} markers at all/);
+});
