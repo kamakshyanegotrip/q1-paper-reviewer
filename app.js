@@ -104,7 +104,15 @@
   }
   async function apiPostForm(path, params) {
     const body = new URLSearchParams(Object.assign({ key: settings().key }, params || {}));
-    return apiJson(await fetch(apiUrl(path), { method: 'POST', body }));
+    // A writer call that never answers must end with a message, not leave the page waiting forever.
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 300000);
+    try {
+      return apiJson(await fetch(apiUrl(path), { method: 'POST', body, signal: ctl.signal }));
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('No answer from the writer after 5 minutes. Try again.');
+      throw e;
+    } finally { clearTimeout(timer); }
   }
 
 
@@ -1460,6 +1468,8 @@
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       if (b.disabled) return;
       b.disabled = true; b.textContent = 'Updating…';
+      // Source choices are locked while the update runs; the list is redrawn when it finishes.
+      app.querySelectorAll(`input[data-tr-fpick^="${sec.id}:"]`).forEach(c => { c.disabled = true; });
       try {
         noteFor(sec.id, `Updating with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources. This can take a minute.`);
         await reviseSection(sec, UPDATE_NOTE, works);
@@ -1471,8 +1481,11 @@
         renderTransform();
         noteFor(sec.id, msg);
       } catch (e) {
-        b.disabled = false; b.textContent = 'Update with selected sources';
-        noteFor(sec.id, 'Not updated: ' + e.message);
+        // The failure is kept with the section, so it stays visible after the page re-renders.
+        const msg = `Not updated at ${new Date().toLocaleTimeString()}: ${e.message}`;
+        saveJob({ secNotes: Object.assign({}, (store.get(TR_KEY, {}) || {}).secNotes || {}, { [sec.id]: msg }) });
+        renderTransform();
+        noteFor(sec.id, msg);
       }
     }));
     app.querySelectorAll('[data-tr-modify]').forEach(b => b.addEventListener('click', async () => {
