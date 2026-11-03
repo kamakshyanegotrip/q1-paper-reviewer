@@ -1024,7 +1024,12 @@
       const list = foundAll[secId] || [];
       if (!list.length) return '';
       const picks = foundPicks[secId] || [];
-      return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`).join('')}</div>`;
+      const used = new Set((job.secUsed || {})[secId] || []);
+      return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => {
+        // A source already used by a finished update is shown as used, not as waiting to be included.
+        if (used.has(w.id || String(w.title || '').toLowerCase())) return `<div style="font-size:14px;margin:3px 0;color:#5b6b5e">✓ Used in last update: ${esc(workLine(w))}</div>`;
+        return `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`;
+      }).join('')}</div>`;
     };
     // Shows, for one section, which works Update will use: the included ones, else the ticked ones.
     const secInclLine = secId => {
@@ -1477,7 +1482,15 @@
         const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
         const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
         const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations, ${(after.references || []).length} references. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.`;
-        saveJob({ secNotes: Object.assign({}, (store.get(TR_KEY, {}) || {}).secNotes || {}, { [sec.id]: msg }) });
+        // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
+        const latest = store.get(TR_KEY, {}) || {};
+        const usedKeys = works.map(w => w.id || String(w.title || '').toLowerCase());
+        saveJob({
+          secNotes: Object.assign({}, latest.secNotes || {}, { [sec.id]: msg }),
+          secUsed: Object.assign({}, latest.secUsed || {}, { [sec.id]: usedKeys }),
+          foundPicks: Object.assign({}, latest.foundPicks || {}, { [sec.id]: [] }),
+          secIncluded: Object.assign({}, latest.secIncluded || {}, { [sec.id]: [] })
+        });
         renderTransform();
         noteFor(sec.id, msg);
       } catch (e) {
