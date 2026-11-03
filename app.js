@@ -1083,7 +1083,7 @@
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
         </div>
         <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
-        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
+        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
         <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
           <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
         <button class="btn btn-sm" type="button" data-tr-modify="${esc(s.id)}">Modify this section</button>` : ''}</article>`;
@@ -1142,7 +1142,7 @@
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
-        ${works.length ? `<button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px">Include selected literature (${picked.length})</button>` : ''}
+        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length})</button>` : ''}
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
@@ -1201,6 +1201,10 @@
         setStatus(`${results.length} works found. Tick the ones to include, then click Include selected literature.`);
       } catch (e) { setStatus('The literature search could not be reached. Try again.'); }
     });
+    const trSelAll = $('#trSelAll');
+    if (trSelAll) trSelAll.addEventListener('click', () => { const c = store.get(TR_KEY, {}) || {}; saveJob({ picked: (c.works || []).map((_, i) => i) }); renderTransform(); });
+    const trSelNone = $('#trSelNone');
+    if (trSelNone) trSelNone.addEventListener('click', () => { saveJob({ picked: [] }); renderTransform(); });
     const trInc = $('#trInclude');
     if (trInc) trInc.addEventListener('click', () => {
       const cur = store.get(TR_KEY, {}) || {};
@@ -1384,6 +1388,19 @@
       c.checked ? set.add(Number(idx)) : set.delete(Number(idx));
       const fp = Object.assign({}, cur.foundPicks || {}); fp[sid] = [...set].sort((a, b) => a - b);
       saveJob({ foundPicks: fp });
+    }));
+    app.querySelectorAll('[data-tr-selall]').forEach(b => b.addEventListener('click', () => {
+      const sid = b.dataset.trSelall;
+      const c = store.get(TR_KEY, {}) || {};
+      const n = ((c.found || {})[sid] || []).length;
+      saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: [...Array(n).keys()] }) });
+      renderTransform();
+    }));
+    app.querySelectorAll('[data-tr-selnone]').forEach(b => b.addEventListener('click', () => {
+      const sid = b.dataset.trSelnone;
+      const c = store.get(TR_KEY, {}) || {};
+      saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: [] }) });
+      renderTransform();
     }));
     app.querySelectorAll('[data-tr-include]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trInclude;
