@@ -770,6 +770,24 @@
   // Bibliography order: alphabetical for author-date styles, order of first citation for numbered styles.
   const sortRefs = (list, style) => TR_NUMBERED.includes(style) ? list.slice() : list.slice().sort((a, b) => String(a).localeCompare(String(b), undefined, { sensitivity: 'base' }));
   const trRefStyle = job => (job && job.style) || (store.get('wr:project', {}) || {}).style || 'apa7';
+  // In-text citation for a {{cite:KEY}} marker, in the chosen style. Unknown keys are matched by author and year.
+  const trCiteText = (key, refMap, style, nums) => {
+    const values = Object.values(refMap);
+    const byAuthorYear = k => {
+      const y = (String(k).match(/\b(19|20)\d{2}\b/) || [])[0];
+      const plain = x => String(x).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z]/g, '');
+      const name = plain(String(k).split(',')[0]);
+      if (!y || name.length < 3) return null;
+      return values.find(t => String(t).includes(y) && plain(t).includes(name)) || null;
+    };
+    const text = refMap[key] || byAuthorYear(key);
+    if (!text) return '[citation needed]';
+    if (TR_NUMBERED.includes(style)) { if (!nums.has(key)) nums.set(key, nums.size + 1); return '[' + nums.get(key) + ']'; }
+    const m = String(text).match(/^(.*?)\s*\((\d{4}|n\.d\.)[a-z]?\)/);
+    const year = m ? m[2] : ((String(text).match(/\d{4}/) || [''])[0]);
+    const surname = m && m[1].trim() ? m[1].split(',')[0].trim() : String(text).replace(/^\(?\d{4}\)?\.?\s*/, '').split(/[.:]/)[0].trim().split(/\s+/).slice(0, 4).join(' ');
+    return '(' + surname + (year ? ', ' + year : '') + ')';
+  };
   // Keeps a section to its own chapter: cuts at the first heading that starts another chapter or subsection.
   const trTrimForeign = (text, secId) => {
     const own = (String(secId || '').match(/chapter_(\d+)/) || [])[1] || null;
@@ -950,24 +968,7 @@
     const refByKey = {};
     secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[r.key]) refByKey[r.key] = r.text; }));
     const citeNums = new Map();
-    // A marker that is not a real key (for example "Name, 2022") is matched to the reference with that author and year.
-    const allRefTexts = Object.values(refByKey);
-    const byAuthorYear = key => {
-      const y = (String(key).match(/\b(19|20)\d{2}\b/) || [])[0];
-      const name = String(key).split(',')[0].trim().toLowerCase().replace(/[^a-z]/g, '');
-      if (!y || name.length < 3) return null;
-      return allRefTexts.find(t => String(t).includes(y) && String(t).toLowerCase().replace(/[^a-z]/g, '').includes(name)) || null;
-    };
-    const citeOf = key => {
-      const text = refByKey[key] || byAuthorYear(key);
-      if (!text) return '[citation needed]';
-      if (TR_NUMBERED.includes(refStyle)) { if (!citeNums.has(key)) citeNums.set(key, citeNums.size + 1); return '[' + citeNums.get(key) + ']'; }
-      const m = String(text).match(/^(.*?)\s*\((\d{4}|n\.d\.)[a-z]?\)/);
-      const year = m ? m[2] : ((String(text).match(/\d{4}/) || [''])[0]);
-      // Author: the first author's surname; with no author, the first few words of the title.
-      const surname = m && m[1].trim() ? m[1].split(',')[0].trim() : String(text).replace(/^\(?\d{4}\)?\.?\s*/, '').split(/[.:]/)[0].trim().split(/\s+/).slice(0, 4).join(' ');
-      return '(' + surname + (year ? ', ' + year : '') + ')';
-    };
+    const citeOf = key => trCiteText(key, refByKey, refStyle, citeNums);
     const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
       const sec = cur.sections[s.id];
       (sec.references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
@@ -1011,12 +1012,21 @@
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
     const isHeadBlock = b => /^#{1,3}\s/.test(b);
     const wordsIn = t => String(t || '').trim().split(/\s+/).filter(Boolean).length;
+    // Preview of a paragraph: tables as tables, citations in the chosen style (the box keeps the raw text for editing).
+    const pageRefMap = {};
+    secs.forEach(s => ((done[s.id] || {}).references || []).forEach(r => { if (r && r.key && r.text && !pageRefMap[r.key]) pageRefMap[r.key] = r.text; }));
+    const previewBlock = b => {
+      const nums = new Map();
+      const withCites = b.replace(/\{\{cite:([^}]+)\}\}/g, (_, k) => trCiteText(k.trim(), pageRefMap, trRefStyle(job), nums));
+      return mdToHtml(withCites, { p: 'margin:0 0 6px;font-size:14px', h1: 'font-size:15px;font-weight:600;margin:8px 0', h2: 'font-size:14px;font-weight:600;margin:8px 0', h3: 'font-size:14px;font-weight:600;margin:6px 0' });
+    };
     const blocksHtml = (secId, text) => blocksOf(text).map((b, i, arr) => {
       if (isHeadBlock(b)) return `<div style="font-weight:600;margin:12px 0 4px">${esc(b.replace(/^#+\s*/, ''))}</div>`;
       const canSuit = i > 0 && !isHeadBlock(arr[i - 1]);
       const key = esc(secId) + '|' + i;
       return `<div style="border:1px solid #e2dccd;border-radius:8px;padding:8px;margin:6px 0">
           <textarea rows="4" data-tr-p="${key}" style="width:100%">${esc(b)}</textarea>
+          ${/\|\s*:?-{2,}/.test(b) || /\{\{cite:/.test(b) ? `<div style="border-top:1px dashed #d8d2c4;margin-top:6px;padding-top:6px"><div class="muted" style="font-size:12px">Preview</div>${previewBlock(b)}</div>` : ''}
           <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px">
             ${canSuit ? `<button class="btn btn-sm" type="button" data-tr-suit="${key}">Suit previous paragraph</button>` : ''}
             <button class="btn btn-sm" type="button" data-tr-pmod="${key}">Modify with AI</button>
