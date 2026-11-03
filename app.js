@@ -810,6 +810,14 @@
     const t = String(title || '').trim();
     return t.split(/\s+/).length >= 4 && !/^(introduction|preface|foreword|predgovor|contents|index|editorial|prologue|epilogue)$/i.test(t.replace(/[.:]+$/, ''));
   }
+  // Rebuilds an OpenAlex abstract (stored as word positions) into plain text. Other sources have no abstract here.
+  function abstractOf(w) {
+    const inv = w && w.abstract_inverted_index;
+    if (!inv || typeof inv !== 'object') return '';
+    const words = [];
+    Object.keys(inv).forEach(word => (inv[word] || []).forEach(p => { words[p] = word; }));
+    return words.filter(Boolean).join(' ');
+  }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -1345,7 +1353,12 @@
       const seenWorks = new Set();
       found = found.filter(w => { const k = w.id || normText(w.title); if (seenWorks.has(k)) return false; seenWorks.add(k); return true; });
       const articleText = normText(cur2.source || '');
-      return found.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
+      // Validation: keep a work only if its title or abstract mentions one of the section's keywords (or topic terms),
+      // and drop front-matter titles. Crossref and Europe PMC results skip the title check inside findLiterature, so it runs here for all sources.
+      const terms = (kws.length ? kws : [queryFor(sec) || '']).map(k => normText(k)).filter(t => t.length >= 4);
+      const blobOf = w => normText(`${w.title || ''} ${abstractOf(w)}`);
+      const relevant = w => !terms.length || terms.some(t => blobOf(w).includes(t));
+      return found.filter(w => usableTitle(w.title) && relevant(w) && !(normText(w.title).length >= 20 && articleText.includes(normText(w.title))));
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
     // until it reaches its planned length. The section is kept as it was if the result is still too short.
