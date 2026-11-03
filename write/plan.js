@@ -197,7 +197,8 @@
     descriptive: 'Descriptive. Set out what, who, where and how in organised detail, without interpretation beyond the sources.',
     detailed: 'Detailed. Expand each point with fuller explanation, examples, figures and supporting evidence, without padding.'
   };
-  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '', instruction = '', approach = '' }) {
+  const TRANSFORM_STYLE_LABEL = { apa7: 'APA 7', harvard: 'Harvard', vancouver: 'Vancouver', chicago: 'Chicago', ieee: 'IEEE', mla: 'MLA' };
+  function buildTransformPrompt({ type, section, words, source, prior = [], sourcesText = '', project = {}, existing = '', instruction = '', approach = '', style = '' }) {
     const t = T.REPORT_TYPES[type] || { label: 'document', sections: [] };
     const s = sectionsOf(type).find(x => x.id === section) || { title: section, brief: '' };
     const plan = sectionsOf(type).filter(x => x.id !== 'references').map(x => `- ${x.title}${x.fixed != null ? ' (fixed length)' : ''}`).join('\n');
@@ -210,7 +211,8 @@
       '- Use the source article below as the basis: keep its claims, evidence and figures. Do not invent facts or figures.',
       '- Re-organise the source material into this section only, as the target structure requires. Material that belongs to another section is left out here.',
       sourcesText ? '- Where the sources listed below are relevant, integrate them and cite each new claim with {{cite:KEY}} using the exact key shown, copied as it is listed (for example a DOI), never an author name or year. Keep existing claims that remain valid. Cite a listed source only where it directly supports the sentence it follows. Leave a sentence uncited when no listed source supports it, and do not repeat the same citation in paragraph after paragraph.' : '',
-      sourcesText ? '' : '- Make no citations: no sources were provided. Write no {{cite:…}} markers at all.',
+      '- Keep every in-text citation the source article already contains (for example (Lee, 2024), [3] or a superscript number) in the same place in the sentence it supports. Do not drop, merge or rephrase a citation away. Write each one in the ' + (TRANSFORM_STYLE_LABEL[style] || 'chosen') + ' style.',
+      sourcesText ? '' : '- Add no new citations: no new sources were listed. Write no {{cite:…}} markers.',
       `- Length: about ${words} words (no more than 10% above or below).`,
       '- Start with the section title as a heading. Separate paragraphs with a blank line.',
       '- Use markdown: "#" for the chapter or section title, "##" for its subsections, "###" for sub-subsections. Use "**bold**" and "*italic*" only where the source uses them.',
