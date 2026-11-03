@@ -209,7 +209,7 @@
       'Rules:',
       '- Use the source article below as the basis: keep its claims, evidence and figures. Do not invent facts or figures.',
       '- Re-organise the source material into this section only, as the target structure requires. Material that belongs to another section is left out here.',
-      sourcesText ? '- Where the sources listed below are relevant, integrate them and cite each new claim with {{cite:KEY}} using the exact key shown, copied as it is listed (for example a DOI), never an author name or year. Keep existing claims that remain valid. Cite a listed source in every paragraph that states a finding, claim or figure it supports; a paragraph with such a claim and no citation is incomplete.' : '',
+      sourcesText ? '- Where the sources listed below are relevant, integrate them and cite each new claim with {{cite:KEY}} using the exact key shown, copied as it is listed (for example a DOI), never an author name or year. Keep existing claims that remain valid. Cite a listed source only where it directly supports the sentence it follows. Leave a sentence uncited when no listed source supports it, and do not repeat the same citation in paragraph after paragraph.' : '',
       sourcesText ? '' : '- Make no citations: no sources were provided. Write no {{cite:…}} markers at all.',
       `- Length: about ${words} words (no more than 10% above or below).`,
       '- Start with the section title as a heading. Separate paragraphs with a blank line.',
