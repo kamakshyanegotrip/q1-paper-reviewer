@@ -1010,6 +1010,17 @@
       const picks = foundPicks[secId] || [];
       return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`).join('')}</div>`;
     };
+    // Shows, for one section, which works Update will use: the included ones, else the ticked ones.
+    const secInclLine = secId => {
+      const inc = ((job.secIncluded || {})[secId]) || [];
+      const pk = foundPicks[secId] || [];
+      if (inc.length) return `<div style="font-size:13px;color:#2d6a3e;margin:6px 0"><b>Included for this section: ${inc.length} work${inc.length > 1 ? 's' : ''}.</b> Update will use these.<details style="margin-top:4px"><summary>Show included works</summary>${inc.map(w => `<div>${esc(workLine(w))}</div>`).join('')}</details></div>`;
+      if (pk.length) return `<div style="font-size:13px;margin:6px 0">${pk.length} ticked but not included yet. Click “Include selected for this section” to confirm. Until then, Update uses the ticked works.</div>`;
+      return '<div class="muted" style="font-size:13px;margin:6px 0">No works included for this section. Tick works, then click Include.</div>';
+    };
+    const globalInclLine = (job.included || []).length
+      ? `<div style="font-size:13px;color:#2d6a3e;margin:6px 0"><b>Included for Transform and updates: ${(job.included || []).length} works.</b> Sections without their own included works use these.</div>`
+      : '<div class="muted" style="font-size:13px;margin:6px 0">None included yet. Tick works, then click Include selected literature.</div>';
     // ---- paragraph-level view: each paragraph is its own box with its own controls ----
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
     const isHeadBlock = b => /^#{1,3}\s/.test(b);
@@ -1083,6 +1094,7 @@
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
         </div>
         <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
+        ${secInclLine(s.id)}
         ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
         <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
           <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
@@ -1142,7 +1154,8 @@
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
-        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length})</button>` : ''}
+        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button>` : ''}
+        ${globalInclLine}
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
@@ -1209,9 +1222,10 @@
     if (trInc) trInc.addEventListener('click', () => {
       const cur = store.get(TR_KEY, {}) || {};
       const pk = Array.isArray(cur.picked) ? cur.picked : [];
+      if (!pk.length) { setStatus('Tick at least one work first, then click Include.'); return; }
       saveJob({ included: (cur.works || []).filter((_, i) => pk.includes(i)) });
       renderTransform();
-      setStatus(`${pk.length} works included for Transform and updates.`);
+      setStatus(`Included ${pk.length} works for Transform and updates.`);
     });
     app.querySelectorAll('input[data-pick]').forEach(c => c.addEventListener('change', () => {
       const cur = store.get(TR_KEY, {}) || {};
@@ -1406,18 +1420,21 @@
       const sid = b.dataset.trInclude;
       const cur = store.get(TR_KEY, {}) || {};
       const list = (cur.found || {})[sid] || [], pk = (cur.foundPicks || {})[sid] || [];
+      if (!pk.length) { setStatus('Tick at least one work for this section first, then click Include.'); return; }
       const inc = Object.assign({}, cur.secIncluded || {}, { [sid]: list.filter((_, i) => pk.includes(i)) });
       saveJob({ secIncluded: inc });
-      noteFor(sid, `${inc[sid].length} works included for this section.`);
+      renderTransform();
+      setStatus(`Included ${inc[sid].length} works for this section. Update will use them.`);
     }));
     app.querySelectorAll('[data-tr-apply]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trApply);
       const cur = store.get(TR_KEY, {}) || {};
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
-      const works = ((cur.secIncluded || {})[sec.id] || []).length ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i));
+      const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
+      const works = fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       try {
-        setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
+        setStatus(`Updating “${sec.title}” with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources…`);
         await reviseSection(sec, UPDATE_NOTE, works);
         renderTransform();
         noteFor(sec.id, `“${sec.title}” updated with new literature.`);
