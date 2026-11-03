@@ -1093,7 +1093,7 @@
       const text = (done[s.id] || {}).text || '';
       const secPicks = (job.secSrc || {})[s.id] || srcTypes;
       return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
-        <div class="muted" data-sec-note="${esc(s.id)}" style="font-size:13px;min-height:1em;margin:4px 0"></div>
+        <div class="muted" data-sec-note="${esc(s.id)}" style="font-size:13px;min-height:1em;margin:4px 0">${esc((job.secNotes || {})[s.id] || '')}</div>
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
         ${text ? `<div style="font-size:13px;margin-top:6px">Keywords for this section</div>${kwBox(s.id, ((job.secKeywords || {})[s.id]) || [])}` : ''}
@@ -1463,8 +1463,13 @@
       try {
         noteFor(sec.id, `Updating with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources. This can take a minute.`);
         await reviseSection(sec, UPDATE_NOTE, works);
+        const after = ((store.get(TR_KEY, {}) || {}).sections || {})[sec.id] || {};
+        const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
+        const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations, ${(after.references || []).length} references. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.`;
+        saveJob({ secNotes: Object.assign({}, (store.get(TR_KEY, {}) || {}).secNotes || {}, { [sec.id]: msg }) });
         renderTransform();
-        noteFor(sec.id, `“${sec.title}” updated with new literature.`);
+        noteFor(sec.id, msg);
       } catch (e) {
         b.disabled = false; b.textContent = 'Update with selected sources';
         noteFor(sec.id, 'Not updated: ' + e.message);
