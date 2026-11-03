@@ -1196,6 +1196,10 @@
       const target = Math.max(300, Number(cur.words) || 6000);
       const outlineNow = PL2.buildOutline(t, target, cur.budgets || {});
       const chosen = (cur.works || []).filter((_, i) => (Array.isArray(cur.picked) ? cur.picked : (cur.works || []).map((_, k) => k)).includes(i));
+      if (!String(cur.query || '').trim() && !confirm('No topic is typed in Step 2, so no new literature will be searched. Continue without new literature?')) {
+        setStatus('Type a topic in Step 2, then transform again.');
+        return;
+      }
       if (!srcChosen().length && !confirm('No literature sources are ticked, so the transform will use only the article. Continue without literature?')) {
         setStatus('Tick sources in Step 2, then transform again.');
         return;
@@ -1266,17 +1270,22 @@
     const apSel = $('#trApproach');
     if (apSel) apSel.addEventListener('change', () => saveJob({ approach: apSel.value }));
     const queryFor = sec => {
-      const cur = store.get(TR_KEY, {}) || {};
-      // Topic: the Step 2 topic if given, else the article's title or opening words, so searches are not just the section heading.
-      const topic = String(cur.query || '').trim() || String(cur.title || '').trim() || String(cur.source || '').trim().split(/\s+/).slice(0, 12).join(' ');
+      const topic = String((store.get(TR_KEY, {}) || {}).query || '').trim();
+      if (!topic) return '';
       const heading = sec.title.replace(/^(chapter\s*\d+\.?|\d+(\.\d+)*\.?)\s*/i, '').trim();
       return [topic, heading].filter(Boolean).join(' ');
     };
+    // Works whose title already appears in the article are its own citations, so they are left out.
+    const normText = x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part. Write only this section: do not write or repeat any other chapter or heading.';
     const findFor = async sec => {
       const types = ((store.get(TR_KEY, {}) || {}).secSrc || {})[sec.id] || srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source for this section.');
-      return findLiterature(queryFor(sec), types, (store.get(TR_KEY, {}) || {}).yearFrom || '');
+      const q = queryFor(sec);
+      if (!q) throw new Error('Type a topic in Step 2 first, so the search finds new literature.');
+      const articleText = normText((store.get(TR_KEY, {}) || {}).source || '');
+      const found = await findLiterature(q, types, (store.get(TR_KEY, {}) || {}).yearFrom || '');
+      return found.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
     // until it reaches its planned length. The section is kept as it was if the result is still too short.
