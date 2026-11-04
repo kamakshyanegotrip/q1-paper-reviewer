@@ -1036,7 +1036,8 @@
       const used = new Set(job.usedKeys || []);
       return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => {
         // A source already used by a finished update is shown as used, not as waiting to be included.
-        if (used.has(w.id || String(w.title || '').toLowerCase())) return `<div style="font-size:14px;margin:3px 0;color:#5b6b5e">✓ Used in last update: ${esc(workLine(w))}</div>`;
+        // Works already used in an update are not listed here; they appear in the Updated list.
+        if (used.has(w.id || String(w.title || '').toLowerCase())) return '';
         return `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`;
       }).join('')}</div>`;
     };
@@ -1123,16 +1124,16 @@
       return `
         <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button></div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
-        <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
+        <button hidden data-tr-apply="${esc(s.id)}">Update</button>
+        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
+        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>
+        <div id="trFound-${esc(s.id)}" style="margin-top:10px">${foundHtml(s.id)}</div>
         ${hasList ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
           <button ${btn} data-tr-selall="${esc(s.id)}">Select all</button>
           <button ${btn} data-tr-selnone="${esc(s.id)}">Clear all</button>
           <button ${btn} data-tr-incupd="${esc(s.id)}">Include &amp; update</button>
           <button ${btn} data-tr-exclude="${esc(s.id)}">Exclude</button>
-        </div>` : ''}
-        <button hidden data-tr-apply="${esc(s.id)}">Update</button>
-        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
-        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>`;
+        </div>` : ''}`;
     };
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
