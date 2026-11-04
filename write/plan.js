@@ -213,7 +213,7 @@
       sourcesText ? '- Where the sources listed below are relevant, integrate them and cite each new claim with {{cite:KEY}} using the exact key shown, copied as it is listed (for example a DOI), never an author name or year. Keep existing claims that remain valid. Cite a listed source only where it directly supports the sentence it follows. Leave a sentence uncited when no listed source supports it, and do not repeat the same citation in paragraph after paragraph.' : '',
       '- Keep every in-text citation the source article already contains (for example (Lee, 2024), [3] or a superscript number) in the same place in the sentence it supports. Do not drop, merge or rephrase a citation away. Write each one in the ' + (TRANSFORM_STYLE_LABEL[style] || 'chosen') + ' style.',
       sourcesText ? '' : '- Add no new citations: no new sources were listed. Write no {{cite:…}} markers.',
-      `- Length: about ${words} words (no more than 10% above or below).`,
+      instruction && String(existing).trim() ? '' : `- Length: about ${words} words (no more than 10% above or below).`,
       '- Start with the section title as a heading. Separate paragraphs with a blank line.',
       '- Use markdown: "#" for the chapter or section title, "##" for its subsections, "###" for sub-subsections. Use "**bold**" and "*italic*" only where the source uses them.',
       '- Tables: keep every table as a markdown pipe table (a header row, a separator row, then one row per line). Put its caption on the line directly above it, in the form "Table N: title", with the original number and title. Never turn table cells into plain lines.',
@@ -225,7 +225,7 @@
     if (instruction && String(existing).trim()) {
       lines.push(`Revise the section below as instructed: ${String(instruction).slice(0, 1000)}`);
       lines.push('Keep the section\'s content, structure and citation keys unless the instruction says otherwise. Where new sources are listed, integrate the relevant ones and cite each new claim with {{cite:KEY}}. Output the complete revised section only.');
-      lines.push(`Section to revise (about ${countWords(existing)} words now; aim for about ${words} words):\n${clip(String(existing), 30000)}`);
+      lines.push(`Section to revise (about ${countWords(existing)} words now). Keep its length as the new sources require; there is no word limit for an update.\n${clip(String(existing), 30000)}`);
     } else if (existing && String(existing).trim()) {
       lines.push(`The section below is already written but is about ${countWords(existing)} words short of the target. Continue it: write about ${words} more words that extend the section with material from the source that is not yet covered. Do not repeat what is written, do not restart the title, and do not write a conclusion for the whole document. Output only the new text.`);
       lines.push(`Section written so far:\n${clip(String(existing), 30000)}`);
