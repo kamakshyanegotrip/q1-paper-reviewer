@@ -1054,6 +1054,11 @@
     const srcTypes = Array.isArray(job.srcTypes) ? job.srcTypes : ['articles', 'reports', 'gov'];
     const foundAll = job.found || {};
     const foundPicks = job.foundPicks || {};
+    const verdictTag = (secId, w) => {
+      const v = ((job.verdicts || {})[secId] || {})[workKey(w)];
+      if (!v) return '';
+      return v.relevant ? ' <span class="tag ok">Relevant</span>' : ` <span class="tag warn">Not relevant</span> <span class="muted" style="font-size:12px">${esc(v.reason)}</span>`;
+    };
     const foundHtml = secId => {
       const list = foundAll[secId] || [];
       if (!list.length) return '';
@@ -1063,7 +1068,7 @@
         // A source already used by a finished update is shown as used, not as waiting to be included.
         // Works already used in an update are not listed here; they appear in the Updated list.
         if (used.has(w.id || String(w.title || '').toLowerCase())) return '';
-        return `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}</label>`;
+        return `<label style="display:block;font-size:14px;margin:3px 0"><input type="checkbox" data-tr-fpick="${esc(secId)}:${i}"${picks.includes(i) ? ' checked' : ''}> ${esc(workLine(w))}${verdictTag(secId, w)}</label>`;
       }).join('')}</div>`;
     };
     // Shows, for one section, which works Update will use: the included ones, else the ticked ones.
@@ -1558,6 +1563,21 @@
       renderTransform();
       noteFor(id, 'Previous version restored. Click Restore previous version again to go back to the newer one.');
     }));
+    // Relevance check: the writer judges each new work against this section before it is ticked.
+    const verifySection = async (sec, works, say) => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const kws = ((cur.secKeywords || {})[sec.id] || []).length ? cur.secKeywords[sec.id] : (cur.keywords || []);
+      const out = {};
+      for (let i = 0; i < works.length; i += 40) {
+        const chunk = works.slice(i, i + 40);
+        say(`Checking the relevance of ${works.length} works to this section (${i + 1} to ${i + chunk.length})…`);
+        const items = chunk.map(w => ({ key: workKey(w), title: w.title || '', abstract: String(abstractOf(w) || '').slice(0, 600) }));
+        const d = await apiPostForm(WRITE_PATH, { action: 'verify', type: cur.type || 'empirical:q1', section: sec.id, project: JSON.stringify({ title: cur.title || '' }), keywords: kws.join(', '), items: JSON.stringify(items) });
+        if (!d.ok) throw new Error(d.reason || 'The relevance check failed.');
+        (d.verdicts || []).forEach(v => { out[v.key] = { relevant: v.relevant === true, reason: String(v.reason || '') }; });
+      }
+      return out;
+    };
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trFind);
       try {
@@ -1572,13 +1592,21 @@
         const seenBefore = new Set((cur.secSeen || {})[sec.id] || []);
         const fresh = found.filter(w => !seenBefore.has(workKey(w)));
         const seenAll = new Set([...seenBefore, ...found.map(workKey)]);
+        let verdicts = {}, verifyErr = '';
+        if (fresh.length) {
+          try { verdicts = await verifySection(sec, fresh, say); } catch (e) { verifyErr = e.message || 'The relevance check failed.'; }
+        }
+        // Only relevant works are ticked. If the check failed, none is ticked and each work says it was not checked.
+        if (verifyErr) fresh.forEach(w => { verdicts[workKey(w)] = { relevant: false, reason: 'Not checked' }; });
+        const relIdx = fresh.map((w, i) => i).filter(i => (verdicts[workKey(fresh[i])] || {}).relevant === true);
         const all = Object.assign({}, cur.found || {}), picks = Object.assign({}, cur.foundPicks || {});
-        all[sec.id] = fresh; picks[sec.id] = fresh.slice(0, 5).map((_, i) => i);
-        if (!saveJob({ found: all, foundPicks: picks, secSeen: Object.assign({}, cur.secSeen || {}, { [sec.id]: [...seenAll] }) })) { noteFor(sec.id, STORAGE_FULL_MSG); return; }
+        all[sec.id] = fresh; picks[sec.id] = relIdx;
+        if (!saveJob({ found: all, foundPicks: picks, verdicts: Object.assign({}, cur.verdicts || {}, { [sec.id]: verdicts }), secSeen: Object.assign({}, cur.secSeen || {}, { [sec.id]: [...seenAll] }) })) { noteFor(sec.id, STORAGE_FULL_MSG); return; }
         renderTransform();
         const st = lastFind || { raw: found.length, kept: found.length };
         if (!fresh.length) noteFor(sec.id, `No new works for this section (${st.raw} results checked; the ones already shown are hidden). Try different keywords.`);
-        else noteFor(sec.id, `${fresh.length} new works for this section (already shown works are hidden). Tick the ones to use, then click Update.`);
+        else if (verifyErr) noteFor(sec.id, `${fresh.length} new works, but the relevance check failed (${verifyErr}). None is ticked; tick the ones to use.`);
+        else noteFor(sec.id, `${fresh.length} new works: ${relIdx.length} relevant (ticked), ${fresh.length - relIdx.length} not relevant (unticked, reason shown). Click Update when ready.`);
       } catch (e) { noteFor(sec.id, e.message || 'The literature search failed.'); }
     }));
     app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
@@ -1592,8 +1620,10 @@
     app.querySelectorAll('[data-tr-selall]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trSelall;
       const c = store.get(TR_KEY, {}) || {};
-      const n = ((c.found || {})[sid] || []).length;
-      saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: [...Array(n).keys()] }) });
+      const list = (c.found || {})[sid] || [];
+      const vd = (c.verdicts || {})[sid] || {};
+      const idx = list.map((_, i) => i).filter(i => !vd[workKey(list[i])] || vd[workKey(list[i])].relevant);
+      saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: idx }) });
       renderTransform();
     }));
     app.querySelectorAll('[data-tr-selnone]').forEach(b => b.addEventListener('click', () => {
