@@ -1042,7 +1042,7 @@
       return '<div class="muted" style="font-size:13px;margin:6px 0">No works included for this section. Tick works, then click Include.</div>';
     };
     const globalInclLine = (job.included || []).length
-      ? `<div style="font-size:13px;color:#2d6a3e;margin:6px 0"><b>Included for Transform and updates: ${(job.included || []).length} works.</b> Sections without their own included works use these.</div>`
+      ? `<div style="font-size:13px;color:#2d6a3e;margin:6px 0"><b>Included for Transform and updates: ${(job.included || []).length} works.</b> Sections without their own included works use these.<details style="margin-top:4px"><summary>Show all ${(job.included || []).length} included works</summary><div style="max-height:320px;overflow:auto;margin-top:4px">${(job.included || []).map((w, i) => `<div style="color:#333">${i + 1}. ${esc(workLine(w))}</div>`).join('')}</div></details></div>`
       : '<div class="muted" style="font-size:13px;margin:6px 0">None included yet. Tick works, then click Include selected literature.</div>';
     // ---- paragraph-level view: each paragraph is its own box with its own controls ----
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
