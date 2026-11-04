@@ -869,6 +869,8 @@
     }
     throw new Error('The literature service is busy (rate limit). Wait a minute, then search again.');
   }
+  // After OpenAlex is found busy, skip it for a while so the other keywords do not each wait for it again.
+  let oaBusyUntil = 0;
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
     let oaBusy = false;
@@ -876,13 +878,14 @@
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
       let res = [];
-      try {
+      if (Date.now() < oaBusyUntil) oaBusy = true;
+      else try {
         const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
         res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
         if (t === 'gov') res = res.filter(isTrustedWork);
       } catch (err) {
-        // OpenAlex is busy: the free Crossref and Europe PMC sources below still run, so the search does not stop.
-        oaBusy = true;
+        // OpenAlex is busy: the free Crossref and Europe PMC sources below still run, and OpenAlex is skipped for the next 2 minutes.
+        oaBusy = true; oaBusyUntil = Date.now() + 120000;
       }
       if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
       if (t === 'other') res = res.concat(await europePmcSearch(query, year).catch(() => []));
