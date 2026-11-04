@@ -826,6 +826,8 @@
     Object.keys(inv).forEach(word => (inv[word] || []).forEach(p => { words[p] = word; }));
     return words.filter(Boolean).join(' ');
   }
+  // Identity of a work in the literature lists, used for include, exclude and "already used" checks.
+  function workKey(w) { return w.id || String(w.title || '').toLowerCase(); }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -1130,7 +1132,7 @@
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
         ${secInclLine(s.id)}
-        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
+        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button><button class="btn btn-sm" type="button" data-tr-exclude="${esc(s.id)}" style="margin:6px 0 6px 6px">Exclude selected for this section</button>` : ''}
         <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
           <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
         <button class="btn btn-sm" type="button" data-tr-modify="${esc(s.id)}">Modify this section</button>` : ''}</article>`;
@@ -1189,7 +1191,7 @@
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
-        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button>` : ''}
+        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button><button class="btn btn-sm" type="button" id="trExclude" style="margin-top:8px;margin-left:6px">Exclude selected literature (${picked.length} ticked)</button>` : ''}
         ${globalInclLine}
       </section>
       <section class="card" style="margin-top:16px">
@@ -1244,6 +1246,9 @@
         results = results.filter(w => { const k = w.id || normText(w.title); if (seen.has(k)) return false; seen.add(k); return true; });
         const articleText = normText(cur.source || '');
         results = results.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
+        // Excluded works are not brought back by a new search.
+        const excludedNow = new Set(cur.excluded || []);
+        results = results.filter(w => !excludedNow.has(workKey(w)));
         saveJob({ query: topic, yearFrom: year, works: results, picked: [] });
         renderTransform();
         setStatus(`${results.length} works found. Tick the ones to include, then click Include selected literature.`);
@@ -1253,6 +1258,18 @@
     if (trSelAll) trSelAll.addEventListener('click', () => { const c = store.get(TR_KEY, {}) || {}; saveJob({ picked: (c.works || []).map((_, i) => i) }); renderTransform(); });
     const trSelNone = $('#trSelNone');
     if (trSelNone) trSelNone.addEventListener('click', () => { saveJob({ picked: [] }); renderTransform(); });
+    const trExcl = $('#trExclude');
+    if (trExcl) trExcl.addEventListener('click', () => {
+      const cur = store.get(TR_KEY, {}) || {};
+      const pk = Array.isArray(cur.picked) ? cur.picked : [];
+      if (!pk.length) { setStatus('Tick at least one work first, then click Exclude.'); return; }
+      const drop = (cur.works || []).filter((_, i) => pk.includes(i));
+      const excluded = [...new Set([...(cur.excluded || []), ...drop.map(workKey)])];
+      // Excluded works leave the list, the included selection, and future searches.
+      saveJob({ works: (cur.works || []).filter((_, i) => !pk.includes(i)), picked: [], excluded, included: (cur.included || []).filter(w => !excluded.includes(workKey(w))) });
+      renderTransform();
+      setStatus(`Excluded ${drop.length} works. They will not come back in future searches.`);
+    });
     const trInc = $('#trInclude');
     if (trInc) trInc.addEventListener('click', () => {
       const cur = store.get(TR_KEY, {}) || {};
@@ -1398,7 +1415,9 @@
       };
       const kept = found.filter(w => usableTitle(w.title) && relevant(w) && !(normText(w.title).length >= 20 && articleText.includes(normText(w.title))));
       lastFind = { raw: found.length, kept: kept.length };
-      return kept;
+      // Works excluded globally or for this section are not brought back.
+      const exSec = new Set([...(cur2.excluded || []), ...((cur2.secExcluded || {})[sec.id] || [])]);
+      return kept.filter(w => !exSec.has(workKey(w)));
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
     // until it reaches its planned length. The section is kept as it was if the result is still too short.
@@ -1485,6 +1504,19 @@
       const c = store.get(TR_KEY, {}) || {};
       saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: [] }) });
       renderTransform();
+    }));
+    app.querySelectorAll('[data-tr-exclude]').forEach(b => b.addEventListener('click', () => {
+      const sid = b.dataset.trExclude;
+      const cur = store.get(TR_KEY, {}) || {};
+      const list = (cur.found || {})[sid] || [], pk = (cur.foundPicks || {})[sid] || [];
+      if (!pk.length) { noteFor(sid, 'Tick at least one work for this section first, then click Exclude.'); return; }
+      const drop = list.filter((_, i) => pk.includes(i));
+      const secEx = Object.assign({}, cur.secExcluded || {}, { [sid]: [...new Set([...((cur.secExcluded || {})[sid] || []), ...drop.map(workKey)])] });
+      const keep = list.filter((_, i) => !pk.includes(i));
+      const inc = Object.assign({}, cur.secIncluded || {}, { [sid]: ((cur.secIncluded || {})[sid] || []).filter(w => !drop.some(d => workKey(d) === workKey(w))) });
+      saveJob({ found: Object.assign({}, cur.found || {}, { [sid]: keep }), foundPicks: Object.assign({}, cur.foundPicks || {}, { [sid]: [] }), secExcluded: secEx, secIncluded: inc });
+      renderTransform();
+      noteFor(sid, `Excluded ${drop.length} works for this section. They will not come back in future searches for it.`);
     }));
     app.querySelectorAll('[data-tr-include]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trInclude;
