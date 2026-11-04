@@ -111,6 +111,8 @@
       return apiJson(await fetch(apiUrl(path), { method: 'POST', body, signal: ctl.signal }));
     } catch (e) {
       if (e && e.name === 'AbortError') throw new Error('No answer from the writer after 5 minutes. Try again.');
+      // 'Failed to fetch' means the connection was cut before the writer answered (the server or gateway closed a long request).
+      if (e && e.name === 'TypeError') throw new Error('The connection to the writer was cut off before it answered, so the section was not updated. Check the writer runs in n8n for this time; if none finished, try again with fewer sources.');
       throw e;
     } finally { clearTimeout(timer); }
   }
