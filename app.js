@@ -1026,7 +1026,7 @@
       const list = foundAll[secId] || [];
       if (!list.length) return '';
       const picks = foundPicks[secId] || [];
-      const used = new Set((job.secUsed || {})[secId] || []);
+      const used = new Set(job.usedKeys || []);
       return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => {
         // A source already used by a finished update is shown as used, not as waiting to be included.
         if (used.has(w.id || String(w.title || '').toLowerCase())) return `<div style="font-size:14px;margin:3px 0;color:#5b6b5e">✓ Used in last update: ${esc(workLine(w))}</div>`;
@@ -1215,6 +1215,16 @@
     // Messages for one section appear beside its own buttons as well as in the status line.
     const noteFor = (secId, t) => { const el = app.querySelector(`[data-sec-note="${secId}"]`); if (el) el.textContent = t; setStatus(t); };
     const saveJob = patch => { store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch)); };
+    // A source used in an update is recorded as used, removed from the search list and the included list, and never used again.
+    const markUsed = works => {
+      const latest = store.get(TR_KEY, {}) || {};
+      const keys = new Set(works.map(workKey));
+      saveJob({
+        usedKeys: [...new Set([...(latest.usedKeys || []), ...keys])],
+        works: (latest.works || []).filter(w => !keys.has(workKey(w))),
+        included: (latest.included || []).filter(w => !keys.has(workKey(w)))
+      });
+    };
 
     $('#trSource').addEventListener('change', e => saveJob({ source: e.target.value }));
     $('#trFile').addEventListener('change', async e => {
@@ -1247,7 +1257,8 @@
         const articleText = normText(cur.source || '');
         results = results.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
         // Excluded works are not brought back by a new search.
-        const excludedNow = new Set(cur.excluded || []);
+        // Only new works appear: not excluded, not already included, and not already used in an update.
+        const excludedNow = new Set([...(cur.excluded || []), ...(cur.usedKeys || []), ...(cur.included || []).map(workKey)]);
         results = results.filter(w => !excludedNow.has(workKey(w)));
         saveJob({ query: topic, yearFrom: year, works: results, picked: [] });
         renderTransform();
@@ -1275,9 +1286,17 @@
       const cur = store.get(TR_KEY, {}) || {};
       const pk = Array.isArray(cur.picked) ? cur.picked : [];
       if (!pk.length) { setStatus('Tick at least one work first, then click Include.'); return; }
-      saveJob({ included: (cur.works || []).filter((_, i) => pk.includes(i)) });
+      // Included works move out of the search list into the included list.
+      const moved = (cur.works || []).filter((_, i) => pk.includes(i));
+      const seenInc = new Set((cur.included || []).map(workKey));
+      const added = moved.filter(w => !seenInc.has(workKey(w)));
+      saveJob({
+        included: [...(cur.included || []), ...added],
+        works: (cur.works || []).filter((_, i) => !pk.includes(i)),
+        picked: []
+      });
       renderTransform();
-      setStatus(`Included ${pk.length} works for Transform and updates.`);
+      setStatus(`Included ${added.length} works for Transform and updates.`);
     });
     app.querySelectorAll('input[data-pick]').forEach(c => c.addEventListener('change', () => {
       const cur = store.get(TR_KEY, {}) || {};
@@ -1416,7 +1435,7 @@
       const kept = found.filter(w => usableTitle(w.title) && relevant(w) && !(normText(w.title).length >= 20 && articleText.includes(normText(w.title))));
       lastFind = { raw: found.length, kept: kept.length };
       // Works excluded globally or for this section are not brought back.
-      const exSec = new Set([...(cur2.excluded || []), ...((cur2.secExcluded || {})[sec.id] || [])]);
+      const exSec = new Set([...(cur2.excluded || []), ...((cur2.secExcluded || {})[sec.id] || []), ...(cur2.usedKeys || []), ...(cur2.included || []).map(workKey)]);
       return kept.filter(w => !exSec.has(workKey(w)));
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
@@ -1533,7 +1552,8 @@
       const cur = store.get(TR_KEY, {}) || {};
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
-      const works = fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i));
+      const usedNow = new Set(cur.usedKeys || []);
+      const works = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       if (b.disabled) return;
       b.disabled = true; b.textContent = 'Updating…';
@@ -1557,6 +1577,7 @@
           foundPicks: Object.assign({}, latest.foundPicks || {}, { [sec.id]: [] }),
           secIncluded: Object.assign({}, latest.secIncluded || {}, { [sec.id]: [] })
         });
+        markUsed(works);
         renderTransform();
         noteFor(sec.id, msg);
       } catch (e) {
@@ -1600,11 +1621,13 @@
         if (!((start.sections || {})[sec.id] || {}).text) continue;
         try {
           setStatus(`Finding literature for “${sec.title}”…`);
-          const incl = (((store.get(TR_KEY, {}) || {}).secIncluded || {})[sec.id] || []);
+          const usedAll = new Set(((store.get(TR_KEY, {}) || {}).usedKeys) || []);
+          const incl = (((store.get(TR_KEY, {}) || {}).secIncluded || {})[sec.id] || []).filter(w => !usedAll.has(workKey(w)));
           const works = incl.length ? incl : (await findFor(sec)).slice(0, 5);
           if (!works.length) { report.push(`${sec.title}: no sources found`); continue; }
           setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
           await reviseSection(sec, UPDATE_NOTE, works);
+          markUsed(works);
           report.push(`${sec.title}: updated`);
         } catch (e) { report.push(`${sec.title}: ${e.message}`); }
       }
