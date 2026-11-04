@@ -830,6 +830,14 @@
   }
   // Identity of a work in the literature lists, used for include, exclude and "already used" checks.
   function workKey(w) { return w.id || String(w.title || '').toLowerCase(); }
+  // Citation keys used in a text ({{cite:KEY}} markers), lower-cased to compare with the sources sent.
+  function citeKeysIn(text) { return new Set((String(text || '').match(/\{\{cite:([^}]+)\}\}/g) || []).map(m => m.slice(7, -2).trim().toLowerCase())); }
+  // How many of the sources sent to the writer are cited in the text (matched by DOI).
+  function citedCoverage(text, works) {
+    const cited = citeKeysIn(text);
+    const keys = (works || []).map(w => String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || String(w.id || '').replace(/^doi:/, '')).map(k => k.toLowerCase()).filter(Boolean);
+    return { covered: keys.filter(k => cited.has(k)).length, total: keys.length };
+  }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -1014,9 +1022,12 @@
     secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[r.key]) refByKey[r.key] = r.text; }));
     const citeNums = new Map();
     const citeOf = key => trCiteText(key, refByKey, refStyle, citeNums);
+    // The reference list holds only the sources the text cites, so it matches the in-text citations.
+    const citedAll = new Set();
+    secs.forEach(s => citeKeysIn(((cur.sections || {})[s.id] || {}).text).forEach(k => citedAll.add(k)));
     const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
       const sec = cur.sections[s.id];
-      (sec.references || []).forEach(r => { if (!refs.includes(r.text)) refs.push(r.text); });
+      (sec.references || []).forEach(r => { if (!refs.includes(r.text) && (!r.key || citedAll.has(String(r.key).toLowerCase()))) refs.push(r.text); });
       const firstLine = String(sec.text).trim().split('\n')[0] || '';
       const hasHeading = /^#{1,3}\s/.test(firstLine);
       const lead = hasHeading ? '' : (type.family === 'book'
@@ -1544,13 +1555,21 @@
       const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
       say('Updating this section with the selected sources. This can take a minute…');
       // No word limit on updates: the writer's revision is accepted as it comes, and each update can be run again.
-      const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, { words: Math.max(1, before), existing, instruction: note }));
-      if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
-      const text = trTrimForeign(String(d.text || ''), sec.id);
-      if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
+      let d = null, text = '', cov = { covered: 0, total: 0 };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        if (attempt > 0) say(`Only ${cov.covered} of ${cov.total} sources were cited. Revising once more so each source is cited…`);
+        const instr = attempt === 0 ? note : note + ` Only ${cov.covered} of the ${cov.total} listed sources were cited in the previous version. Cite every listed source at least once, in the sentence it supports, written exactly as {{cite:KEY}} with its key from the Sources list.`;
+        d = await apiPostForm(WRITE_PATH, Object.assign({}, base, { words: Math.max(1, before), existing, instruction: instr }));
+        if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
+        text = trTrimForeign(String(d.text || ''), sec.id);
+        if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
+        cov = citedCoverage(text, works);
+        if (cov.total < 3 || cov.covered >= cov.total * 0.5) break;
+      }
       const prevSection = sections[sec.id] || null;
       sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
       if (!saveJob({ sections, secPrev: prevSection ? Object.assign({}, (store.get(TR_KEY, {}) || {}).secPrev || {}, { [sec.id]: prevSection }) : ((store.get(TR_KEY, {}) || {}).secPrev || {}) })) throw new Error(STORAGE_FULL_MSG);
+      return cov;
     };
     app.querySelectorAll('[data-tr-restore]').forEach(b => b.addEventListener('click', () => {
       const id = b.dataset.trRestore; const cur = store.get(TR_KEY, {}) || {};
@@ -1687,11 +1706,11 @@
         noteFor(sec.id, `Updating with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources. This can take a minute.`);
         const noteEl = app.querySelector(`[data-sec-note="${sec.id}"]`);
         if (noteEl && noteEl.scrollIntoView) noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        await reviseSection(sec, UPDATE_NOTE, works);
+        const cov = await reviseSection(sec, UPDATE_NOTE, works);
         const after = ((store.get(TR_KEY, {}) || {}).sections || {})[sec.id] || {};
         const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
         const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations, ${(after.references || []).length} references. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${cov.covered} of ${cov.total} sources are cited in the text. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.`;
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const usedKeys = works.map(w => w.id || String(w.title || '').toLowerCase());
