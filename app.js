@@ -1696,7 +1696,12 @@
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
       const usedNow = new Set(cur.usedKeys || []);
-      const works = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)));
+      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)));
+      // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
+      const UPDATE_BATCH = 30;
+      const works = allWorks.slice(0, UPDATE_BATCH);
+      const restWorks = allWorks.slice(UPDATE_BATCH);
+      const restKeys = new Set(restWorks.map(workKey));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       if (b.disabled) return;
       b.disabled = true; b.textContent = 'Updating…';
@@ -1710,7 +1715,7 @@
         const after = ((store.get(TR_KEY, {}) || {}).sections || {})[sec.id] || {};
         const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
         const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${cov.covered} of ${cov.total} sources are cited in the text. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${cov.covered} of ${cov.total} sources are cited in the text. Used ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources.` + (restWorks.length ? ` ${restWorks.length} more are still ${fromIncluded ? 'included' : 'ticked'}: click Update again for the next ${Math.min(UPDATE_BATCH, restWorks.length)}.` : '');
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const usedKeys = works.map(w => w.id || String(w.title || '').toLowerCase());
@@ -1721,6 +1726,10 @@
           secIncluded: Object.assign({}, latest.secIncluded || {}, { [sec.id]: [] })
         });
         markUsed(works, sec.id);
+        // Sources not used in this batch stay ticked (or included) for the next Update.
+        const after2 = store.get(TR_KEY, {}) || {};
+        if (fromIncluded) saveJob({ secIncluded: Object.assign({}, after2.secIncluded || {}, { [sec.id]: restWorks }) });
+        else { const fl = (after2.found || {})[sec.id] || []; saveJob({ foundPicks: Object.assign({}, after2.foundPicks || {}, { [sec.id]: fl.map((_, i) => i).filter(i => restKeys.has(workKey(fl[i]))) }) }); }
         renderTransform();
         noteFor(sec.id, msg);
       } catch (e) {
