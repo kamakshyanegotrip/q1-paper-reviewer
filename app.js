@@ -1111,6 +1111,29 @@
       } catch (e) { noteFor(secId, e.message); }
     };
 
+    // One layout for every section: Search, the results to tick, the actions, then the Included and Updated lists.
+    const litPanel = s => {
+      const hasList = ((job.found || {})[s.id] || []).length > 0;
+      const inc = (job.secIncluded || {})[s.id] || [];
+      const usedW = (job.secUsedWorks || {})[s.id] || [];
+      const listOf = ws => ws.length
+        ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
+        : '<div class="muted" style="font-size:13px">None yet.</div>';
+      const btn = 'class="btn btn-sm" type="button"';
+      return `
+        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button></div>
+        <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
+        <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
+        ${hasList ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
+          <button ${btn} data-tr-selall="${esc(s.id)}">Select all</button>
+          <button ${btn} data-tr-selnone="${esc(s.id)}">Clear all</button>
+          <button ${btn} data-tr-incupd="${esc(s.id)}">Include &amp; update</button>
+          <button ${btn} data-tr-exclude="${esc(s.id)}">Exclude</button>
+        </div>` : ''}
+        <button hidden data-tr-apply="${esc(s.id)}">Update</button>
+        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
+        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>`;
+    };
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
       const secPicks = (job.secSrc || {})[s.id] || srcTypes;
@@ -1132,15 +1155,8 @@
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
         ${text ? `<div style="font-size:13px;margin-top:6px">Keywords for this section</div>${kwBox(s.id, ((job.secKeywords || {})[s.id]) || [])}` : ''}
-        ${text ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
-          <button class="btn btn-sm" type="button" data-tr-find="${esc(s.id)}">Find literature</button>
-          <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
-        </div>
-        <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
-        <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
-        ${secInclLine(s.id)}
-        ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button><button class="btn btn-sm" type="button" data-tr-exclude="${esc(s.id)}" style="margin:6px 0 6px 6px">Exclude selected for this section</button>` : ''}
-        <label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
+        ${text ? litPanel(s) : ''}
+        ${text ? `<label class="field" style="margin-top:8px"><span>Modify with AI <i>instruction</i></span>
           <textarea rows="2" data-tr-instr="${esc(s.id)}" placeholder="e.g. make the argument more critical and add a paragraph on policy"></textarea></label>
         <button class="btn btn-sm" type="button" data-tr-modify="${esc(s.id)}">Modify this section</button>` : ''}</article>`;
     }).join('');
@@ -1223,13 +1239,17 @@
     const noteFor = (secId, t) => { const el = app.querySelector(`[data-sec-note="${secId}"]`); if (el) el.textContent = t; setStatus(t); };
     const saveJob = patch => { store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch)); };
     // A source used in an update is recorded as used, removed from the search list and the included list, and never used again.
-    const markUsed = works => {
+    const markUsed = (works, secId) => {
       const latest = store.get(TR_KEY, {}) || {};
       const keys = new Set(works.map(workKey));
+      const prevW = ((latest.secUsedWorks || {})[secId]) || [];
+      const seenU = new Set(prevW.map(workKey));
+      const addW = works.filter(w => !seenU.has(workKey(w)));
       saveJob({
         usedKeys: [...new Set([...(latest.usedKeys || []), ...keys])],
         works: (latest.works || []).filter(w => !keys.has(workKey(w))),
-        included: (latest.included || []).filter(w => !keys.has(workKey(w)))
+        included: (latest.included || []).filter(w => !keys.has(workKey(w))),
+        secUsedWorks: Object.assign({}, latest.secUsedWorks || {}, { [secId]: [...prevW, ...addW] })
       });
     };
 
@@ -1529,6 +1549,18 @@
       saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: [] }) });
       renderTransform();
     }));
+    // Include & update: the ticked works become this section's included list, then the section is updated with them.
+    app.querySelectorAll('[data-tr-incupd]').forEach(b => b.addEventListener('click', () => {
+      const sid = b.dataset.trIncupd;
+      const cur = store.get(TR_KEY, {}) || {};
+      const list = (cur.found || {})[sid] || [], pk = (cur.foundPicks || {})[sid] || [];
+      if (!pk.length) { noteFor(sid, 'Tick the literature you want to include first.'); return; }
+      const picked = list.filter((_, i) => pk.includes(i));
+      saveJob({ secIncluded: Object.assign({}, cur.secIncluded || {}, { [sid]: picked }) });
+      renderTransform();
+      const applyBtn = app.querySelector(`button[data-tr-apply="${sid}"]`);
+      if (applyBtn) applyBtn.click();
+    }));
     app.querySelectorAll('[data-tr-exclude]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trExclude;
       const cur = store.get(TR_KEY, {}) || {};
@@ -1582,7 +1614,7 @@
           foundPicks: Object.assign({}, latest.foundPicks || {}, { [sec.id]: [] }),
           secIncluded: Object.assign({}, latest.secIncluded || {}, { [sec.id]: [] })
         });
-        markUsed(works);
+        markUsed(works, sec.id);
         renderTransform();
         noteFor(sec.id, msg);
       } catch (e) {
@@ -1632,7 +1664,7 @@
           if (!works.length) { report.push(`${sec.title}: no sources found`); continue; }
           setStatus(`Updating “${sec.title}” with ${works.length} sources…`);
           await reviseSection(sec, UPDATE_NOTE, works);
-          markUsed(works);
+          markUsed(works, sec.id);
           report.push(`${sec.title}: updated`);
         } catch (e) { report.push(`${sec.title}: ${e.message}`); }
       }
