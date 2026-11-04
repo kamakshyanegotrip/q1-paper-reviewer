@@ -1057,6 +1057,7 @@
       ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
       : '<div class="muted" style="font-size:13px">None yet.</div>';
     const updatedAllW = (() => { const seen = new Set(); return Object.values(job.secUsedWorks || {}).flat().filter(w => { const k = w.id || String(w.title || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); })();
+    const globalButtons = works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button><button class="btn btn-sm" type="button" id="trExclude" style="margin-top:8px;margin-left:6px">Exclude selected literature (${picked.length} ticked)</button>` : '';
     const globalLists = `<div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${(job.included || []).length})</b>${listAllW(job.included || [])}</div><div style="margin-top:8px;font-size:14px"><b>Updated (${updatedAllW.length})</b>${listAllW(updatedAllW)}</div>`;
     // ---- paragraph-level view: each paragraph is its own box with its own controls ----
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
@@ -1131,15 +1132,15 @@
         <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button></div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         <button hidden data-tr-apply="${esc(s.id)}">Update</button>
-        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
-        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>
-        <div id="trFound-${esc(s.id)}" style="margin-top:10px">${foundHtml(s.id)}</div>
         ${hasList ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
           <button ${btn} data-tr-selall="${esc(s.id)}">Select all</button>
           <button ${btn} data-tr-selnone="${esc(s.id)}">Clear all</button>
           <button ${btn} data-tr-incupd="${esc(s.id)}">Include &amp; update</button>
           <button ${btn} data-tr-exclude="${esc(s.id)}">Exclude</button>
-        </div>` : ''}`;
+        </div>` : ''}
+        <div id="trFound-${esc(s.id)}" style="margin-top:10px">${foundHtml(s.id)}</div>
+        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
+        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>`;
     };
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
@@ -1220,9 +1221,9 @@
         </div>
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
-        ${globalLists}
+        ${globalButtons}
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
-        ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button><button class="btn btn-sm" type="button" id="trExclude" style="margin-top:8px;margin-left:6px">Exclude selected literature (${picked.length} ticked)</button>` : ''}
+        ${globalLists}
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
