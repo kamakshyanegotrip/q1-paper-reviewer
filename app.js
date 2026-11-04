@@ -1169,6 +1169,23 @@
     };
 
     // One layout for every section: Search, the results to tick, the actions, then the Included and Updated lists.
+    // For one section: which sent sources the text cites, the sentence each supports, and which sent sources are not cited.
+    const citationsHtml = secId => {
+      const text = String(((job.sections || {})[secId] || {}).text || '');
+      const sent = (job.secUsedWorks || {})[secId] || [];
+      if (!text.trim() || !sent.length) return '';
+      const cited = citeKeysIn(text);
+      const keyOf = w => String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '').toLowerCase() || String(w.id || '').replace(/^doi:/, '').toLowerCase();
+      const sentences = text.split(/(?<=[.!?])\s+/);
+      const sentenceFor = k => (sentences.find(x => x.toLowerCase().includes('{{cite:' + k + '}}')) || '').replace(/\{\{cite:[^}]+\}\}/g, '').trim();
+      const rows = sent.map(w => ({ w, k: keyOf(w) }));
+      const yes = rows.filter(r => r.k && cited.has(r.k));
+      const no = rows.filter(r => !(r.k && cited.has(r.k)));
+      return `<details style="margin:8px 0;font-size:14px"><summary><b>Citations in this section: ${yes.length} of ${sent.length} sent sources</b></summary>
+        <ol style="margin:6px 0 8px 18px">${yes.map(r => `<li><b>${esc(r.w.title)}</b>${r.w.primary_location && r.w.primary_location.source && r.w.primary_location.source.display_name ? ' <span class="muted">' + esc(r.w.primary_location.source.display_name) + '</span>' : ''}<br><span class="muted">Text: “${esc(sentenceFor(r.k).slice(0, 300))}”</span></li>`).join('') || '<li class="muted">None of the sent sources is cited yet.</li>'}</ol>
+        <div><b>Sent but not cited (${no.length})</b></div>
+        <ul style="margin:4px 0 0 18px">${no.map(r => `<li class="muted">${esc(r.w.title)}</li>`).join('') || '<li class="muted">All sent sources are cited.</li>'}</ul></details>`;
+    };
     const litPanel = s => {
       const hasList = ((job.found || {})[s.id] || []).length > 0;
       const inc = (job.secIncluded || {})[s.id] || [];
@@ -1180,6 +1197,7 @@
       return `
         <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
+        ${citationsHtml(s.id)}
         <button hidden data-tr-apply="${esc(s.id)}">Update</button>
         ${hasList ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
           <button ${btn} data-tr-selall="${esc(s.id)}">Select all</button>
