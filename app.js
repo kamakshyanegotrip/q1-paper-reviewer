@@ -1410,7 +1410,7 @@
       const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
       // Progress shows beside this section's buttons, not only in the status line at the top of the panel.
       const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
-      let text = '', refs = [];
+      let text = '', refs = [], stopReason = '';
       for (let attempt = 0; attempt < 4; attempt++) {
         const have = wordCount(text);
         if (attempt > 0 && have >= target) break;
@@ -1421,14 +1421,14 @@
           existing: first ? existing : text,
           instruction: first ? note : ''
         }));
-        if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be revised.'); break; }
-        if (!String(d.text || '').trim()) break;
+        if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be revised.'); stopReason = 'a follow-up writer call failed: ' + (d.reason || 'no reason given'); break; }
+        if (!String(d.text || '').trim()) { stopReason = 'a follow-up writer call returned no text'; break; }
         text = first ? d.text : text + '\n\n' + d.text;
         (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
       }
       text = trTrimForeign(text, sec.id);
       const after = wordCount(text);
-      if (existing && after < before) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was. Try again, or select fewer sources.`);
+      if (existing && after < before) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was${stopReason ? ' (' + stopReason + ')' : ''}. Try again, or select fewer sources.`);
       sections[sec.id] = { text: text || existing, references: mergeRefs((sections[sec.id] || {}).references, refs) };
       saveJob({ sections });
     };
