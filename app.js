@@ -1243,12 +1243,15 @@
 
     // Bibliography: every reference the transformed sections cite, once, in the chosen style.
     const refStyleNow = trRefStyle(job);
+    // The References list holds only sources the text cites, so it matches the in-text citations.
+    const citedNow = new Set();
+    secs.forEach(s => citeKeysIn((done[s.id] || {}).text).forEach(k => citedNow.add(k)));
     const allRefs = [];
-    secs.forEach(s => ((done[s.id] || {}).references || []).forEach(r => { if (r && r.text && !allRefs.includes(r.text)) allRefs.push(r.text); }));
+    secs.forEach(s => ((done[s.id] || {}).references || []).forEach(r => { if (r && r.text && (!r.key || citedNow.has(String(r.key).toLowerCase())) && !allRefs.includes(r.text)) allRefs.push(r.text); }));
     const refsPanel = !allRefs.length ? '' : `<div class="card" style="margin:10px 0;padding:10px 12px">
         <div style="font-weight:600;margin-bottom:4px">References · ${esc((TR_STYLES.find(x => x[0] === refStyleNow) || [0, refStyleNow])[1])}</div>
         <p class="muted" style="font-size:13px;margin:0 0 8px">References keep the style they were formatted in. To reformat them in a new style, run Transform now, which rewrites every section.</p>
-        <ol style="list-style:none;padding:0;margin:0;font-size:14px">${sortRefs(allRefs, refStyleNow).map(r => `<li style="margin:0 0 6px 0.5in;text-indent:-0.5in">${mdInline(r)}</li>`).join('')}</ol></div>`;
+        <ol style="list-style:none;padding:0;margin:0;font-size:14px">${sortRefs(allRefs, refStyleNow).map(r => `<li style="margin:0 0 6px 0.5in;text-indent:-0.5in">${mdInline(String(r).replace(/&amp;/g, '&'))}</li>`).join('')}</ol></div>`;
 
     app.innerHTML = `
       <section class="card" style="margin-top:8px">
