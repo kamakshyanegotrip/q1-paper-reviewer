@@ -1106,7 +1106,6 @@
       const text = (done[s.id] || {}).text || '';
       const secPicks = (job.secSrc || {})[s.id] || srcTypes;
       return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
-        <div class="muted" data-sec-note="${esc(s.id)}" style="font-size:13px;min-height:1em;margin:4px 0">${esc((job.secNotes || {})[s.id] || '')}</div>
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
         ${text ? `<div style="font-size:13px;margin-top:6px">Keywords for this section</div>${kwBox(s.id, ((job.secKeywords || {})[s.id]) || [])}` : ''}
@@ -1114,6 +1113,7 @@
           <button class="btn btn-sm" type="button" data-tr-find="${esc(s.id)}">Find literature</button>
           <button class="btn btn-sm" type="button" data-tr-apply="${esc(s.id)}">Update with selected sources</button>
         </div>
+        <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         <div id="trFound-${esc(s.id)}">${foundHtml(s.id)}</div>
         ${secInclLine(s.id)}
         ${(((job.found || {})[s.id]) || []).length ? `<button class="btn btn-sm" type="button" data-tr-selall="${esc(s.id)}" style="margin:6px 6px 6px 0">Select all</button><button class="btn btn-sm" type="button" data-tr-selnone="${esc(s.id)}" style="margin:6px 6px 6px 0">Clear</button><button class="btn btn-sm" type="button" data-tr-include="${esc(s.id)}" style="margin:6px 0">Include selected for this section</button>` : ''}
@@ -1486,6 +1486,8 @@
       app.querySelectorAll(`input[data-tr-fpick^="${sec.id}:"]`).forEach(c => { c.disabled = true; });
       try {
         noteFor(sec.id, `Updating with ${works.length} ${fromIncluded ? 'included' : 'ticked'} sources. This can take a minute.`);
+        const noteEl = app.querySelector(`[data-sec-note="${sec.id}"]`);
+        if (noteEl && noteEl.scrollIntoView) noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         await reviseSection(sec, UPDATE_NOTE, works);
         const after = ((store.get(TR_KEY, {}) || {}).sections || {})[sec.id] || {};
         const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
