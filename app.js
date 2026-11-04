@@ -1625,6 +1625,10 @@
       const idx = list.map((_, i) => i).filter(i => !vd[workKey(list[i])] || vd[workKey(list[i])].relevant);
       saveJob({ foundPicks: Object.assign({}, c.foundPicks || {}, { [sid]: idx }) });
       renderTransform();
+      const skipped = list.length - idx.length;
+      if (!list.length) noteFor(sid, 'No works to select. Search literature first.');
+      else if (!idx.length) noteFor(sid, `None of the ${list.length} works is relevant to this section, so none was ticked. Tick any you still want.`);
+      else noteFor(sid, `Ticked the ${idx.length} relevant works.${skipped ? ` ${skipped} not relevant ${skipped === 1 ? 'work was' : 'works were'} left unticked; tick ${skipped === 1 ? 'it' : 'them'} yourself if you want ${skipped === 1 ? 'it' : 'them'}.` : ''}`);
     }));
     app.querySelectorAll('[data-tr-selnone]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trSelnone;
