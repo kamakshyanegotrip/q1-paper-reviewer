@@ -857,12 +857,24 @@
       type: 'article', cited_by_count: r.citedByCount || 0, abstract_inverted_index: null, is_retracted: false
     })).filter(w => usableTitle(w.title));
   }
+  // The literature service rate-limits (HTTP 429). Wait and retry; if it stays busy, say so instead of showing "no results".
+  async function getWithRetry(url) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const res = await fetch(url);
+      if (res.status !== 429) {
+        if (!res.ok) throw new Error('The literature service returned an error (HTTP ' + res.status + '). Try again shortly.');
+        return res;
+      }
+      await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+    }
+    throw new Error('The literature service is busy (rate limit). Wait a minute, then search again.');
+  }
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
     for (const t of srcTypes) {
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
-      const d = await (await fetch('https://api.openalex.org/works?' + params.toString())).json();
+      const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
       let res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
       if (t === 'gov') res = res.filter(isTrustedWork);
       if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
