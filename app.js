@@ -871,16 +871,24 @@
   }
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
+    let oaBusy = false;
     for (const t of srcTypes) {
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
-      const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
-      let res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
-      if (t === 'gov') res = res.filter(isTrustedWork);
+      let res = [];
+      try {
+        const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
+        res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
+        if (t === 'gov') res = res.filter(isTrustedWork);
+      } catch (err) {
+        // OpenAlex is busy: the free Crossref and Europe PMC sources below still run, so the search does not stop.
+        oaBusy = true;
+      }
       if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
       if (t === 'other') res = res.concat(await europePmcSearch(query, year).catch(() => []));
       res.slice(0, 12).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
     }
+    if (!out.length && oaBusy) throw new Error('The literature services are busy right now. Wait a minute, then search again.');
     return out;
   }
   const mergeRefs = (a = [], b = []) => { const out = [...a]; b.forEach(r => { if (!out.some(q => q.text === r.text)) out.push(r); }); return out; };
@@ -1509,32 +1517,17 @@
       const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
       const before = wordCount(existing);
       const t = cur.type || 'empirical:q1';
-      // Updates keep the section at its current length and add the new sources. The planned length applies only to the first transformation.
-      const target = before;
       const note = instruction || 'Revise the section to use the new sources listed, keeping its content and structure.';
       const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
       // Progress shows beside this section's buttons, not only in the status line at the top of the panel.
       const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
-      let text = '', refs = [], stopReason = '';
-      for (let attempt = 0; attempt < 4; attempt++) {
-        const have = wordCount(text);
-        if (attempt > 0 && have >= target) break;
-        say(`Updating: ${have} of ${target} words so far (attempt ${attempt + 1} of 4). This can take a minute.`);
-        const first = attempt === 0;
-        const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, {
-          words: first ? target : Math.max(300, target - have),
-          existing: first ? existing : text,
-          instruction: first ? note : ''
-        }));
-        if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be revised.'); stopReason = 'a follow-up writer call failed: ' + (d.reason || 'no reason given'); break; }
-        if (!String(d.text || '').trim()) { stopReason = 'a follow-up writer call returned no text'; break; }
-        text = first ? d.text : text + '\n\n' + d.text;
-        (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
-      }
-      text = trTrimForeign(text, sec.id);
-      const after = wordCount(text);
-      if (existing && after < before) throw new Error(`The revision came back shorter (${after} words instead of ${before}), so the section was kept as it was${stopReason ? ' (' + stopReason + ')' : ''}. Try again, or select fewer sources.`);
-      sections[sec.id] = { text: text || existing, references: mergeRefs((sections[sec.id] || {}).references, refs) };
+      say('Updating this section with the selected sources. This can take a minute…');
+      // No word limit on updates: the writer's revision is accepted as it comes, and each update can be run again.
+      const d = await apiPostForm(WRITE_PATH, Object.assign({}, base, { words: Math.max(1, before), existing, instruction: note }));
+      if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
+      const text = trTrimForeign(String(d.text || ''), sec.id);
+      if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
+      sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
       saveJob({ sections });
     };
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
