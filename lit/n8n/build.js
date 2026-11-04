@@ -157,6 +157,25 @@ const revise = b.action === 'revise';
 const para = b.action === 'paragraph';
 // Transform: rewrite a section of an uploaded article into the target format, with the sources the user picked.
 const transform = b.action === 'transform';
+// Relevance check: the writer judges each found work against this section (action: verify). No text is written.
+if (b.action === 'verify') {
+  let items = [];
+  try { items = JSON.parse(b.items || '[]'); } catch (e) { return [{ json: { early: { ok: false, reason: 'The works to check could not be read' } } }]; }
+  items = (Array.isArray(items) ? items : []).slice(0, 40).map(w => ({ key: String(w.key || ''), title: String(w.title || '').slice(0, 300), abstract: String(w.abstract || '').slice(0, 600) })).filter(w => w.key);
+  if (!items.length) return [{ json: { early: { ok: false, reason: 'No works to check' } } }];
+  const kwList = String(b.keywords || '').slice(0, 500);
+  const lines = [
+    'You check whether academic works are relevant to one section of a document.',
+    'Document: ' + (project.title || '(not given)'),
+    'Section: ' + sec.title + '. Purpose: ' + (sec.brief || ''),
+    'Keywords for this section: ' + (kwList || '(none)'),
+    'For each numbered work, decide whether it directly addresses this section topic and could support writing it. A shared word alone (a place name, a generic term) is not enough.',
+    'Reply with only a JSON array, one object per work, in the same order: {"n": number, "relevant": true or false, "reason": "a short reason, under 15 words"}.',
+    'Works:'
+  ];
+  items.forEach((w, i) => lines.push((i + 1) + '. ' + w.title + (w.abstract ? ' | ' + w.abstract : '')));
+  return [{ json: { prompt: lines.join('\\n'), verify: true, verifyKeys: items.map(w => w.key), early: null, words: 0, kept: [], searched: 0, sourceErrors: [] } }];
+}
 let works = [];
 if (transform) {
   try { works = JSON.parse(b.works || '[]'); } catch (e) { return [{ json: { early: { ok: false, reason: 'The selected literature could not be read' } } }]; }
@@ -219,6 +238,18 @@ const { finishLiterature } = __req('pipeline');
 const prep = $('Write engine').first().json || {};
 const out = $input.first().json || {};
 let text = '', error = '';
+if (prep.verify) {
+  if (prep.early) return [{ json: { ok: false, reason: prep.early.reason, verdicts: [] } }];
+  if (out.error) return [{ json: { ok: false, reason: 'The relevance check failed: ' + String(out.error.message || 'no reason given').slice(0, 200), verdicts: [] } }];
+  const raw = ((out.candidates && out.candidates[0] && out.candidates[0].content && out.candidates[0].content.parts) || []).map(p => p.text || '').join('');
+  const start = raw.indexOf('['), end = raw.lastIndexOf(']');
+  let arr = [];
+  try { arr = JSON.parse(start >= 0 && end > start ? raw.slice(start, end + 1) : '[]'); } catch (e) { arr = []; }
+  const keys = prep.verifyKeys || [];
+  const verdicts = (Array.isArray(arr) ? arr : []).map(v => ({ key: keys[(Number(v.n) || 0) - 1], relevant: v.relevant === true, reason: String(v.reason || '').slice(0, 160) })).filter(v => v.key);
+  if (!verdicts.length) return [{ json: { ok: false, reason: 'The relevance check gave no readable answer.', verdicts: [] } }];
+  return [{ json: { ok: true, verdicts } }];
+}
 if (!prep.early) {
   if (out.error) error = String(out.error.message || JSON.stringify(out.error)).slice(0, 300);
   else text = ((out.candidates && out.candidates[0] && out.candidates[0].content && out.candidates[0].content.parts) || []).map(p => p.text || '').join('');
