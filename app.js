@@ -1271,11 +1271,13 @@
           <label class="field"><span>Published from <i>year, optional</i></span><input type="number" id="trYear" min="1950" max="2026" value="${esc(job.yearFrom || '')}"></label>
         </div>
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
+        <div hidden>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
         <div id="trGlobalNote" class="muted" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0">${esc(job.globalNote || '')}</div>
         ${globalButtons}
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
         ${globalLists}
+        </div>
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
