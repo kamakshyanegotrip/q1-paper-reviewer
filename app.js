@@ -1105,7 +1105,21 @@
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
       const secPicks = (job.secSrc || {})[s.id] || srcTypes;
-      return `<article style="margin-bottom:14px"><div style="font-weight:600">${esc(s.title)} <span class="muted" style="font-weight:400;font-size:13px">${outline.sections.find(x => x.id === s.id).words} words planned</span></div>
+      // Each section is a bordered panel with a header: its number, title, word count and status.
+      const secIndex = secs.indexOf(s) + 1;
+      const secWords = String(text || '').trim() ? String(text).trim().split(/\s+/).length : 0;
+      const lastNote = (job.secNotes || {})[s.id] || '';
+      const statusTag = !text ? '<span style="background:#eee;color:#555;border-radius:10px;padding:2px 8px;font-size:12px">Not transformed</span>'
+        : /^Not updated/.test(lastNote) ? '<span style="background:#fbe3dc;color:#8a2b12;border-radius:10px;padding:2px 8px;font-size:12px">Last update not applied</span>'
+        : /^Updated/.test(lastNote) ? '<span style="background:#dcefe0;color:#1f5a2c;border-radius:10px;padding:2px 8px;font-size:12px">Updated</span>'
+        : '<span style="background:#eef0f7;color:#33405f;border-radius:10px;padding:2px 8px;font-size:12px">Transformed</span>';
+      return `<article data-sec-panel="${esc(s.id)}" style="margin-bottom:18px;border:1px solid #cfc8b6;border-left:6px solid #7a6a3f;border-radius:8px;background:#fffdf7;padding:10px 14px">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-bottom:1px solid #e3ddcc;padding-bottom:8px;margin-bottom:8px">
+          <span style="font-size:13px;font-weight:700;color:#7a6a3f">Section ${secIndex} of ${secs.length}</span>
+          <span style="font-weight:700;font-size:16px">${esc(s.title)}</span>
+          <span class="muted" style="font-size:13px">${secWords ? secWords + ' words now' : ''} · ${outline.sections.find(x => x.id === s.id).words} words planned</span>
+          <span style="margin-left:auto">${statusTag}</span>
+        </div>
         ${text ? blocksHtml(s.id, text) : '<p class="muted" style="font-size:14px">Not transformed yet.</p>'}
         ${text ? `<fieldset style="border:0;padding:0;margin:6px 0"><legend style="font-size:13px;margin-bottom:4px">Update literature from</legend>${Object.keys(TR_SRC_LABELS).map(k => `<label style="margin-right:12px;font-size:13px"><input type="checkbox" data-sec-src="${esc(s.id)}|${k}"${secPicks.includes(k) ? ' checked' : ''}> ${esc(TR_SRC_LABELS[k])}</label>`).join('')}</fieldset>` : ''}
         ${text ? `<div style="font-size:13px;margin-top:6px">Keywords for this section</div>${kwBox(s.id, ((job.secKeywords || {})[s.id]) || [])}` : ''}
