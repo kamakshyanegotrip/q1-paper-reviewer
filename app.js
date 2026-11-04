@@ -1057,8 +1057,16 @@
       ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
       : '<div class="muted" style="font-size:13px">None yet.</div>';
     const updatedAllW = (() => { const seen = new Set(); return Object.values(job.secUsedWorks || {}).flat().filter(w => { const k = w.id || String(w.title || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); })();
+    // One combined list: works to be updated, then works already used, each tagged.
+    const combinedList = (inc, usedW) => {
+      const rows = [...inc.map(w => ({ w, tag: "Included" })), ...usedW.map(w => ({ w, tag: "Updated" }))];
+      const body = rows.length
+        ? rows.map((r, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(r.w))} <span style="font-size:12px;border-radius:10px;padding:1px 7px;background:${r.tag === "Updated" ? "#dcefe0" : "#eef0f7"}">${r.tag}</span></div>`).join("")
+        : '<div class="muted" style="font-size:13px">None yet.</div>';
+      return `<div style="margin-top:10px;font-size:14px"><b>Included/Updated List (${rows.length})</b>${body}</div>`;
+    };
     const globalButtons = works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button><button class="btn btn-sm" type="button" id="trExclude" style="margin-top:8px;margin-left:6px">Exclude selected literature (${picked.length} ticked)</button>` : '';
-    const globalLists = `<div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${(job.included || []).length})</b>${listAllW(job.included || [])}</div><div style="margin-top:8px;font-size:14px"><b>Updated (${updatedAllW.length})</b>${listAllW(updatedAllW)}</div>`;
+    const globalLists = combinedList(job.included || [], updatedAllW);
     // ---- paragraph-level view: each paragraph is its own box with its own controls ----
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
     const isHeadBlock = b => /^#{1,3}\s/.test(b);
@@ -1139,8 +1147,7 @@
           <button ${btn} data-tr-exclude="${esc(s.id)}">Exclude</button>
         </div>` : ''}
         <div id="trFound-${esc(s.id)}" style="margin-top:10px">${foundHtml(s.id)}</div>
-        <div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${inc.length})</b>${listOf(inc)}</div>
-        <div style="margin-top:8px;font-size:14px"><b>Updated (${usedW.length})</b>${listOf(usedW)}</div>`;
+        ${combinedList(inc, usedW)}`;
     };
     const sectionHtml = secs.map(s => {
       const text = (done[s.id] || {}).text || '';
