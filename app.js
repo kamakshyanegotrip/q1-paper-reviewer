@@ -1228,6 +1228,7 @@
         </div>
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
+        <div id="trGlobalNote" class="muted" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0">${esc(job.globalNote || '')}</div>
         ${globalButtons}
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
         ${globalLists}
@@ -1283,14 +1284,15 @@
 
     // Literature: searched in the browser (OpenAlex is open to browsers); the works you tick are sent with the transform.
     $('#trSearch').addEventListener('click', async () => {
+      const note = t => { const el = $('#trGlobalNote'); if (el) el.textContent = t; setStatus(t); };
       const cur = store.get(TR_KEY, {}) || {};
       const topic = $('#trQuery').value.trim();
       const queries = (cur.keywords || []).length ? cur.keywords : (topic ? [topic] : []);
-      if (!queries.length) { setStatus('Type a topic or add keywords first.'); return; }
+      if (!queries.length) { note('Type a topic or add keywords first.'); return; }
       const types = srcChosen();
-      if (!types.length) { setStatus('Tick at least one source type first.'); return; }
+      if (!types.length) { note('Tick at least one source type first.'); return; }
       const year = $('#trYear').value.trim();
-      setStatus('Searching new literature…');
+      note('Searching new literature…');
       try {
         let results = [];
         for (const q of queries) results = results.concat(await findLiterature(q, types, year));
@@ -1298,6 +1300,9 @@
         results = results.filter(w => { const k = w.id || normText(w.title); if (seen.has(k)) return false; seen.add(k); return true; });
         const articleText = normText(cur.source || '');
         results = results.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
+        const termsG = queries.map(q => normText(q)).filter(t => t.length >= 4);
+        const hitsG = termsG.map(t => new RegExp("(^|[^a-z0-9])" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "($|[^a-z0-9])"));
+        results = results.filter(w => usableTitle(w.title) && (!hitsG.length || hitsG.some(re => re.test(normText(w.title || "")) || re.test(normText(abstractOf(w))))));
         // Excluded works are not brought back by a new search.
         // Only new works appear: not excluded, not already included, and not already used in an update.
         // Every work shown in an earlier search is remembered, so a repeat search shows only works not seen before.
@@ -1305,10 +1310,10 @@
         const fresh = results.filter(w => !seenNow.has(workKey(w)));
         saveJob({ query: topic, yearFrom: year, works: fresh, picked: [], seenKeys: [...new Set([...(cur.seenKeys || []), ...fresh.map(workKey)])] });
         renderTransform();
-        setStatus(fresh.length
+        note(fresh.length
           ? `${fresh.length} new works found. Works shown before are not shown again. Tick the ones to include, then click Include selected literature.`
           : 'No new works for these keywords. Everything found so far is already listed, included or used.');
-      } catch (e) { setStatus('The literature search could not be reached. Try again.'); }
+      } catch (e) { note('The literature search could not be reached. Try again.'); }
     });
     const trSelAll = $('#trSelAll');
     if (trSelAll) trSelAll.addEventListener('click', () => { const c = store.get(TR_KEY, {}) || {}; saveJob({ picked: (c.works || []).map((_, i) => i) }); renderTransform(); });
