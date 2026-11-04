@@ -1052,6 +1052,12 @@
     const globalInclLine = (job.included || []).length
       ? `<div style="font-size:13px;color:#2d6a3e;margin:6px 0"><b>Included for Transform and updates: ${(job.included || []).length} works.</b> Sections without their own included works use these.<details style="margin-top:4px"><summary>Show all ${(job.included || []).length} included works</summary><div style="max-height:320px;overflow:auto;margin-top:4px">${(job.included || []).map((w, i) => `<div style="color:#333">${i + 1}. ${esc(workLine(w))}</div>`).join('')}</div></details></div>`
       : '<div class="muted" style="font-size:13px;margin:6px 0">None included yet. Tick works, then click Include selected literature.</div>';
+    // Top panel, same layout as each section: Included (to be updated) and Updated lists, shown under Search and above the results.
+    const listAllW = ws => ws.length
+      ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
+      : '<div class="muted" style="font-size:13px">None yet.</div>';
+    const updatedAllW = (() => { const seen = new Set(); return Object.values(job.secUsedWorks || {}).flat().filter(w => { const k = w.id || String(w.title || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); })();
+    const globalLists = `<div style="margin-top:10px;font-size:14px"><b>Included, to be updated (${(job.included || []).length})</b>${listAllW(job.included || [])}</div><div style="margin-top:8px;font-size:14px"><b>Updated (${updatedAllW.length})</b>${listAllW(updatedAllW)}</div>`;
     // ---- paragraph-level view: each paragraph is its own box with its own controls ----
     const blocksOf = t => String(t || '').split(/\n\s*\n/).map(x => x.trim()).filter(Boolean);
     const isHeadBlock = b => /^#{1,3}\s/.test(b);
@@ -1214,9 +1220,9 @@
         </div>
         <div><span style="font-size:14px">Keywords <i>each keyword is searched separately</i></span>${kwBox('global', job.keywords || [])}</div>
         <button class="btn btn-sm" type="button" id="trSearch">Search new literature</button>
+        ${globalLists}
         <div id="trWorks" style="margin-top:12px">${worksHtml}</div>
         ${works.length ? `<button class="btn btn-sm" type="button" id="trSelAll" style="margin-top:8px">Select all</button><button class="btn btn-sm" type="button" id="trSelNone" style="margin-top:8px;margin-left:6px">Clear</button><button class="btn btn-sm" type="button" id="trInclude" style="margin-top:8px;margin-left:6px">Include selected literature (${picked.length} ticked)</button><button class="btn btn-sm" type="button" id="trExclude" style="margin-top:8px;margin-left:6px">Exclude selected literature (${picked.length} ticked)</button>` : ''}
-        ${globalInclLine}
       </section>
       <section class="card" style="margin-top:16px">
         <div class="card-head"><h2 style="margin:0">Step 3 · Transform</h2><small>one section at a time, in the target format's order</small></div>
