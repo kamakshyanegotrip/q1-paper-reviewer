@@ -1162,7 +1162,7 @@
         : '<div class="muted" style="font-size:13px">None yet.</div>';
       const btn = 'class="btn btn-sm" type="button"';
       return `
-        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button></div>
+        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         <button hidden data-tr-apply="${esc(s.id)}">Update</button>
         ${hasList ? `<div style="margin-top:6px;display:flex;flex-wrap:wrap;gap:8px">
@@ -1289,6 +1289,7 @@
       saveJob({
         usedKeys: [...new Set([...(latest.usedKeys || []), ...keys])],
         works: (latest.works || []).filter(w => !keys.has(workKey(w))),
+        found: Object.assign({}, latest.found || {}, { [secId]: ((latest.found || {})[secId] || []).filter(w => !keys.has(workKey(w))) }),
         included: (latest.included || []).filter(w => !keys.has(workKey(w))),
         secUsedWorks: Object.assign({}, latest.secUsedWorks || {}, { [secId]: [...prevW, ...addW] })
       });
@@ -1536,9 +1537,21 @@
       if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
       const text = trTrimForeign(String(d.text || ''), sec.id);
       if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
+      const prevSection = sections[sec.id] || null;
       sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
-      saveJob({ sections });
+      saveJob({ sections, secPrev: prevSection ? Object.assign({}, (store.get(TR_KEY, {}) || {}).secPrev || {}, { [sec.id]: prevSection }) : ((store.get(TR_KEY, {}) || {}).secPrev || {}) });
     };
+    app.querySelectorAll('[data-tr-restore]').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.trRestore; const cur = store.get(TR_KEY, {}) || {};
+      const prev = (cur.secPrev || {})[id]; if (!prev) return;
+      const sections = Object.assign({}, cur.sections || {});
+      const current = sections[id] || null;
+      sections[id] = { text: prev.text || '', references: prev.references || [] };
+      // The version being replaced is kept, so Restore can be clicked again to go back to it.
+      saveJob({ sections, secPrev: Object.assign({}, cur.secPrev || {}, current ? { [id]: current } : {}) });
+      renderTransform();
+      noteFor(id, 'Previous version restored. Click Restore previous version again to go back to the newer one.');
+    }));
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trFind);
       try {
