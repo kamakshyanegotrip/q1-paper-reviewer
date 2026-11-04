@@ -1278,7 +1278,13 @@
     const setStatus = t => { const el = $('#trStatus'); if (el) el.textContent = t; };
     // Messages for one section appear beside its own buttons as well as in the status line.
     const noteFor = (secId, t) => { const el = app.querySelector(`[data-sec-note="${secId}"]`); if (el) el.textContent = t; setStatus(t); };
-    const saveJob = patch => { store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch)); };
+    // The browser keeps the Transform job in local storage. When that storage is full, the save fails; the page now says so instead of showing results that were not kept.
+    const STORAGE_FULL_MSG = 'Not saved: this browser’s storage is full. Remove old saved reviews from this browser, then try again.';
+    const saveJob = patch => {
+      const ok = store.set(TR_KEY, Object.assign({}, store.get(TR_KEY, {}) || {}, patch));
+      if (!ok) setStatus(STORAGE_FULL_MSG);
+      return ok;
+    };
     // A source used in an update is recorded as used, removed from the search list and the included list, and never used again.
     const markUsed = (works, secId) => {
       const latest = store.get(TR_KEY, {}) || {};
@@ -1539,7 +1545,7 @@
       if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
       const prevSection = sections[sec.id] || null;
       sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
-      saveJob({ sections, secPrev: prevSection ? Object.assign({}, (store.get(TR_KEY, {}) || {}).secPrev || {}, { [sec.id]: prevSection }) : ((store.get(TR_KEY, {}) || {}).secPrev || {}) });
+      if (!saveJob({ sections, secPrev: prevSection ? Object.assign({}, (store.get(TR_KEY, {}) || {}).secPrev || {}, { [sec.id]: prevSection }) : ((store.get(TR_KEY, {}) || {}).secPrev || {}) })) throw new Error(STORAGE_FULL_MSG);
     };
     app.querySelectorAll('[data-tr-restore]').forEach(b => b.addEventListener('click', () => {
       const id = b.dataset.trRestore; const cur = store.get(TR_KEY, {}) || {};
@@ -1568,7 +1574,7 @@
         const seenAll = new Set([...seenBefore, ...found.map(workKey)]);
         const all = Object.assign({}, cur.found || {}), picks = Object.assign({}, cur.foundPicks || {});
         all[sec.id] = fresh; picks[sec.id] = fresh.slice(0, 5).map((_, i) => i);
-        saveJob({ found: all, foundPicks: picks, secSeen: Object.assign({}, cur.secSeen || {}, { [sec.id]: [...seenAll] }) });
+        if (!saveJob({ found: all, foundPicks: picks, secSeen: Object.assign({}, cur.secSeen || {}, { [sec.id]: [...seenAll] }) })) { noteFor(sec.id, STORAGE_FULL_MSG); return; }
         renderTransform();
         const st = lastFind || { raw: found.length, kept: found.length };
         if (!fresh.length) noteFor(sec.id, `No new works for this section (${st.raw} results checked; the ones already shown are hidden). Try different keywords.`);
