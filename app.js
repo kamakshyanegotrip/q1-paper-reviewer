@@ -1404,8 +1404,8 @@
       const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
       const before = wordCount(existing);
       const t = cur.type || 'empirical:q1';
-      const planned = PL2.buildOutline(t, Math.max(300, Number(cur.words) || 6000), cur.budgets || {}).sections.find(x => x.id === sec.id).words;
-      const target = Math.max(planned, before);
+      // Updates keep the section at its current length and add the new sources. The planned length applies only to the first transformation.
+      const target = before;
       const note = instruction || 'Revise the section to use the new sources listed, keeping its content and structure.';
       const base = { action: 'transform', type: t, section: sec.id, source: cur.source || existing, works: JSON.stringify(works || []), style: trRefStyle(cur), project: JSON.stringify({ title: cur.title || '' }), prior: '[]', approach: cur.approach || '' };
       // Progress shows beside this section's buttons, not only in the status line at the top of the panel.
