@@ -1258,11 +1258,14 @@
         results = results.filter(w => { const t = normText(w.title); return !(t.length >= 20 && articleText.includes(t)); });
         // Excluded works are not brought back by a new search.
         // Only new works appear: not excluded, not already included, and not already used in an update.
-        const excludedNow = new Set([...(cur.excluded || []), ...(cur.usedKeys || []), ...(cur.included || []).map(workKey)]);
-        results = results.filter(w => !excludedNow.has(workKey(w)));
-        saveJob({ query: topic, yearFrom: year, works: results, picked: [] });
+        // Every work shown in an earlier search is remembered, so a repeat search shows only works not seen before.
+        const seenNow = new Set([...(cur.seenKeys || []), ...(cur.excluded || []), ...(cur.usedKeys || []), ...(cur.included || []).map(workKey)]);
+        const fresh = results.filter(w => !seenNow.has(workKey(w)));
+        saveJob({ query: topic, yearFrom: year, works: fresh, picked: [], seenKeys: [...new Set([...(cur.seenKeys || []), ...fresh.map(workKey)])] });
         renderTransform();
-        setStatus(`${results.length} works found. Tick the ones to include, then click Include selected literature.`);
+        setStatus(fresh.length
+          ? `${fresh.length} new works found. Works shown before are not shown again. Tick the ones to include, then click Include selected literature.`
+          : 'No new works for these keywords. Everything found so far is already listed, included or used.');
       } catch (e) { setStatus('The literature search could not be reached. Try again.'); }
     });
     const trSelAll = $('#trSelAll');
