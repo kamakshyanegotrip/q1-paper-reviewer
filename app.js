@@ -1365,14 +1365,19 @@
     const normText = x => String(x || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
     const UPDATE_NOTE = 'Integrate the selected new sources where they strengthen the section, and cite each with its key. Keep the whole section: do not shorten it or drop any part. Write only this section: do not write or repeat any other chapter or heading.';
     let lastFind = null;   // counts from the last search, shown to the user
-    const findFor = async sec => {
+    const findFor = async (sec, progress) => {
       const types = ((store.get(TR_KEY, {}) || {}).secSrc || {})[sec.id] || srcChosen();
       if (!types.length) throw new Error('Choose at least one literature source for this section.');
       const cur2 = store.get(TR_KEY, {}) || {};
       const kws = ((cur2.secKeywords || {})[sec.id] || []).length ? cur2.secKeywords[sec.id] : (cur2.keywords || []);
       const year = cur2.yearFrom || '';
       let found = [];
-      if (kws.length) { for (const kw of kws) found = found.concat(await findLiterature(kw, types, year)); }
+      if (kws.length) {
+        for (let k = 0; k < kws.length; k++) {
+          if (progress) progress(`Searching “${kws[k]}” (${k + 1} of ${kws.length} keywords)…`);
+          found = found.concat(await findLiterature(kws[k], types, year));
+        }
+      }
       else {
         const q = queryFor(sec);
         if (!q) throw new Error('Type a topic or keywords in Step 2 first, so the search finds new literature.');
@@ -1435,8 +1440,12 @@
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trFind);
       try {
-        setStatus(`Finding literature for “${sec.title}”…`);
-        const found = await findFor(sec);
+        // Progress shows beside this section's buttons, and the page scrolls to it.
+        const say = t => { noteFor(sec.id, t); };
+        say(`Searching literature for “${sec.title}”. This can take a minute…`);
+        const noteEl = app.querySelector(`[data-sec-note="${sec.id}"]`);
+        if (noteEl && noteEl.scrollIntoView) noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const found = await findFor(sec, say);
         const cur = store.get(TR_KEY, {}) || {};
         // Each search adds to the list for this section, so later rounds of keywords do not discard earlier works.
         const keyOf = w => w.id || String(w.title || '').toLowerCase();
@@ -1453,7 +1462,7 @@
         renderTransform();
         const st = lastFind || { raw: found.length, kept: found.length };
         if (!fresh.length) noteFor(sec.id, `No new relevant works from these keywords (${st.raw} results checked). Add different keywords and search again.`);
-        else setStatus(`${fresh.length} new relevant works added for “${sec.title}” (${merged.length} in the list). Tick the ones to use, then update.`);
+        else noteFor(sec.id, `${fresh.length} new relevant works added (${merged.length} in the list). Tick the ones to use, then click Update.`);
       } catch (e) { noteFor(sec.id, e.message || 'The literature search failed.'); }
     }));
     app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
