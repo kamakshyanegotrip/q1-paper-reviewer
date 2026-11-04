@@ -1488,22 +1488,17 @@
         if (noteEl && noteEl.scrollIntoView) noteEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
         const found = await findFor(sec, say);
         const cur = store.get(TR_KEY, {}) || {};
-        // Each search adds to the list for this section, so later rounds of keywords do not discard earlier works.
-        const keyOf = w => w.id || String(w.title || '').toLowerCase();
-        const prev = (cur.found || {})[sec.id] || [];
-        const prevKeys = new Set(prev.map(keyOf));
-        const fresh = found.filter(w => !prevKeys.has(keyOf(w)));
-        const merged = prev.concat(fresh);
+        // Per section: the list shows only works this section has not shown before, so a repeat search does not bring back old works.
+        const seenBefore = new Set((cur.secSeen || {})[sec.id] || []);
+        const fresh = found.filter(w => !seenBefore.has(workKey(w)));
+        const seenAll = new Set([...seenBefore, ...found.map(workKey)]);
         const all = Object.assign({}, cur.found || {}), picks = Object.assign({}, cur.foundPicks || {});
-        const oldPicks = picks[sec.id] || [];
-        // Keep earlier ticks; tick the first five new works from this round.
-        const newTicks = fresh.slice(0, 5).map((_, i) => prev.length + i);
-        all[sec.id] = merged; picks[sec.id] = [...new Set([...oldPicks, ...newTicks])];
-        saveJob({ found: all, foundPicks: picks });
+        all[sec.id] = fresh; picks[sec.id] = fresh.slice(0, 5).map((_, i) => i);
+        saveJob({ found: all, foundPicks: picks, secSeen: Object.assign({}, cur.secSeen || {}, { [sec.id]: [...seenAll] }) });
         renderTransform();
         const st = lastFind || { raw: found.length, kept: found.length };
-        if (!fresh.length) noteFor(sec.id, `No new relevant works from these keywords (${st.raw} results checked). Add different keywords and search again.`);
-        else noteFor(sec.id, `${fresh.length} new relevant works added (${merged.length} in the list). Tick the ones to use, then click Update.`);
+        if (!fresh.length) noteFor(sec.id, `No new works for this section (${st.raw} results checked; the ones already shown are hidden). Try different keywords.`);
+        else noteFor(sec.id, `${fresh.length} new works for this section (already shown works are hidden). Tick the ones to use, then click Update.`);
       } catch (e) { noteFor(sec.id, e.message || 'The literature search failed.'); }
     }));
     app.querySelectorAll('input[data-tr-fpick]').forEach(c => c.addEventListener('change', () => {
