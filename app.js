@@ -1329,13 +1329,17 @@
         // Excluded works are not brought back by a new search.
         // Only new works appear: not excluded, not already included, and not already used in an update.
         // Every work shown in an earlier search is remembered, so a repeat search shows only works not seen before.
+        const exSet = new Set(cur.excluded || []), usedSet = new Set(cur.usedKeys || []), seenSet = new Set(cur.seenKeys || []);
+        const hidEx = results.filter(w => exSet.has(workKey(w))).length;
+        const hidUsed = results.filter(w => !exSet.has(workKey(w)) && usedSet.has(workKey(w))).length;
+        const hidSeen = results.filter(w => !exSet.has(workKey(w)) && !usedSet.has(workKey(w)) && seenSet.has(workKey(w))).length;
         const seenNow = new Set([...(cur.seenKeys || []), ...(cur.excluded || []), ...(cur.usedKeys || []), ...(cur.included || []).map(workKey)]);
         const fresh = results.filter(w => !seenNow.has(workKey(w)));
         saveJob({ query: topic, yearFrom: year, works: fresh, picked: [], seenKeys: [...new Set([...(cur.seenKeys || []), ...fresh.map(workKey)])] });
         renderTransform();
-        note(fresh.length
-          ? `${fresh.length} new works found. Works shown before are not shown again. Tick the ones to include, then click Include selected literature.`
-          : 'No new works for these keywords. Everything found so far is already listed, included or used.');
+        if (fresh.length) note(`${fresh.length} new works found. Works shown before are not shown again. Tick the ones to include, then click Include selected literature.`);
+        else if (!results.length) note('The search ran, but the sources returned no works that match these keywords. Try other keywords.');
+        else note(`The search found ${results.length} matching works, but none are new: ${hidEx} are excluded, ${hidUsed} were already used in an update, ${hidSeen} were shown before. Clear excluded works to see them again, or try other keywords.`);
       } catch (e) { note('The literature search could not be reached. Try again.'); }
     });
     const trSelAll = $('#trSelAll');
