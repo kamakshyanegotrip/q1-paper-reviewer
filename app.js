@@ -1008,6 +1008,13 @@
 
   function renderTransform() {
     const W2 = window.Q1Write, PL2 = window.Q1Plan;
+    // Clean-up: works already included or used are removed from the search list, so it shows only new works.
+    {
+      const saved = store.get(TR_KEY, {}) || {};
+      const gone = new Set([...(saved.included || []).map(workKey), ...(saved.usedKeys || [])]);
+      const kept = (saved.works || []).filter(w => !gone.has(workKey(w)));
+      if (kept.length !== (saved.works || []).length) store.set(TR_KEY, Object.assign({}, saved, { works: kept, picked: [] }));
+    }
     const job = store.get(TR_KEY, {}) || {};
     const type = W2.REPORT_TYPES[job.type] ? job.type : 'empirical:q1';
     const picked = Array.isArray(job.picked) ? job.picked : (job.works || []).map((_, i) => i);
