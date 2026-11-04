@@ -831,6 +831,17 @@
   // Identity of a work in the literature lists, used for include, exclude and "already used" checks.
   function workKey(w) { return w.id || String(w.title || '').toLowerCase(); }
   // Citation keys used in a text ({{cite:KEY}} markers), lower-cased to compare with the sources sent.
+  // A source can be cited only if its first author has a real name (not missing, not a title, not "Unknown").
+  function usableAuthor(w) {
+    const a = ((w.authorships || [])[0] || {}).author || {};
+    const name = String(a.display_name || '').trim();
+    if (!name || /unknown/i.test(name) || name.startsWith('[') || name.length < 3) return false;
+    return /[A-Za-zÀ-ž]{2,}/.test(name) && !/^[^A-Za-zÀ-ž]*$/.test(name);
+  }
+  // The most citation markers in one sentence: several at the end of one sentence means the writer bunched them.
+  function maxCitesInSentence(text) {
+    return Math.max(0, ...String(text || '').split(/(?<=[.!?])\s+/).map(x => (x.match(/\{\{cite:/g) || []).length));
+  }
   function citeKeysIn(text) { return new Set((String(text || '').match(/\{\{cite:([^}]+)\}\}/g) || []).map(m => m.slice(7, -2).trim().toLowerCase())); }
   // How many of the sources sent to the writer are cited in the text (matched by DOI).
   function citedCoverage(text, works) {
@@ -1587,7 +1598,7 @@
         text = trTrimForeign(String(d.text || ''), sec.id);
         if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
         cov = citedCoverage(text, works);
-        if (cov.total < 3 || cov.covered >= cov.total * 0.5) break;
+        if (cov.total < 3 || (cov.covered >= cov.total * 0.5 && maxCitesInSentence(text) < 3)) break;
       }
       const prevSection = sections[sec.id] || null;
       sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
@@ -1640,6 +1651,7 @@
         }
         // Only relevant works are ticked. If the check failed, none is ticked and each work says it was not checked.
         if (verifyErr) fresh.forEach(w => { verdicts[workKey(w)] = { relevant: false, reason: 'Not checked' }; });
+        fresh.forEach(w => { if (!usableAuthor(w)) verdicts[workKey(w)] = { relevant: false, reason: 'No usable author name, so it cannot be cited' }; });
         const relIdx = fresh.map((w, i) => i).filter(i => (verdicts[workKey(fresh[i])] || {}).relevant === true);
         const all = Object.assign({}, cur.found || {}), picks = Object.assign({}, cur.foundPicks || {});
         all[sec.id] = fresh; picks[sec.id] = relIdx;
@@ -1719,7 +1731,7 @@
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
       const usedNow = new Set(cur.usedKeys || []);
-      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)));
+      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)) && usableAuthor(w));
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
       const UPDATE_BATCH = 30;
       const works = allWorks.slice(0, UPDATE_BATCH);
