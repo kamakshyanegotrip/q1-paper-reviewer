@@ -842,15 +842,18 @@
   function maxCitesInSentence(text) {
     return Math.max(0, ...String(text || '').split(/(?<=[.!?])\s+/).map(x => (x.match(/\{\{cite:/g) || []).length));
   }
-  function citeKeysIn(text) { return new Set((String(text || '').match(/\{\{cite:([^}]+)\}\}/g) || []).map(m => m.slice(7, -2).trim().toLowerCase())); }
+  function citeKeysIn(text) { return new Set((String(text || '').match(/\{\{cite:([^}]+)\}\}/g) || []).map(m => nkey(m.slice(7, -2)))); }
   // How many of the sources sent to the writer are cited in the text (matched by DOI).
   function citedCoverage(text, works) {
     const cited = citeKeysIn(text);
-    const keys = (works || []).map(w => String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || String(w.id || '').replace(/^doi:/, '')).map(k => k.toLowerCase()).filter(Boolean);
-    return { covered: keys.filter(k => cited.has(k)).length, total: keys.length };
+    const list = (works || []).filter(w => workCiteKeys(w).length);
+    return { covered: list.filter(w => workCiteKeys(w).some(k => cited.has(k))).length, total: list.length };
   }
   // The key a source is cited by in the text: its DOI, or its id.
-  function workCiteKey(w) { return (String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || String(w.id || '').replace(/^doi:/, '')).toLowerCase(); }
+  // One key form for comparing citation keys: lower case, without the DOI web prefix.
+  function nkey(k) { return String(k || '').trim().toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '').replace(/^doi:/, ''); }
+  // The keys a source can be cited by: its DOI, its id, or its title key (the form used when there is no DOI).
+  function workCiteKeys(w) { return [w.doi, w.id, 'ty:' + String(w.title || '').slice(0, 60)].map(nkey).filter(k => k && k !== 'ty:'); }
   // A reference whose first author is a single letter, empty or "Unknown" cannot be cited properly.
   function badRefName(text) { const s = String(text || '').trim().split(',')[0].replace(/[^A-Za-zÀ-ž]/g, ''); return s.length < 3 || /unknown/i.test(s); }
   function isTrustedWork(w) {
@@ -1045,15 +1048,15 @@
     // In-text citations: each {{cite:KEY}} becomes (Author, Year), or [n] in numbered styles, from the saved references.
     const refStyle = trRefStyle(cur);
     const refByKey = {};
-    secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[r.key]) refByKey[r.key] = r.text; }));
+    secs.forEach(s => ((cur.sections || {})[s.id] || {}).references && (cur.sections[s.id].references).forEach(r => { if (r && r.key && r.text && !refByKey[nkey(r.key)]) refByKey[nkey(r.key)] = r.text; }));
     const citeNums = new Map();
-    const citeOf = key => trCiteText(key, refByKey, refStyle, citeNums);
+    const citeOf = key => trCiteText(nkey(key), refByKey, refStyle, citeNums);
     // The reference list holds only the sources the text cites, so it matches the in-text citations.
     const citedAll = new Set();
     secs.forEach(s => citeKeysIn(((cur.sections || {})[s.id] || {}).text).forEach(k => citedAll.add(k)));
     const body = secs.filter(s => (cur.sections || {})[s.id] && (cur.sections || {})[s.id].text).map(s => {
       const sec = cur.sections[s.id];
-      (sec.references || []).forEach(r => { if (!refs.includes(r.text) && (!r.key || citedAll.has(String(r.key).toLowerCase()))) refs.push(r.text); });
+      (sec.references || []).forEach(r => { if (!refs.includes(r.text) && (!r.key || citedAll.has(nkey(r.key)))) refs.push(r.text); });
       const firstLine = String(sec.text).trim().split('\n')[0] || '';
       const hasHeading = /^#{1,3}\s/.test(firstLine);
       const lead = hasHeading ? '' : (type.family === 'book'
@@ -1776,10 +1779,10 @@
         const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
         // Only sources the new text actually cites are marked Updated; the others stay ticked for the next run.
         const citedNow = citeKeysIn(after.text);
-        const usedWorks = works.filter(w => { const k = workCiteKey(w); return !!k && citedNow.has(k); });
+        const usedWorks = works.filter(w => workCiteKeys(w).some(k => citedNow.has(k)));
         const unusedWorks = works.filter(w => !usedWorks.includes(w));
         restKeys = new Set(restWorks.map(workKey));
-        const refKeys = new Set((after.references || []).map(r => String(r.key || '').toLowerCase()));
+        const refKeys = new Set((after.references || []).map(r => nkey(r.key)));
         const noRef = [...citedNow].filter(k => !refKeys.has(k)).length;
         const badAuthors = (after.references || []).filter(r => badRefName(r.text)).length;
         const checkText = noRef || badAuthors ? ` Check: ${noRef} citation${noRef === 1 ? '' : 's'} have no reference; ${badAuthors} reference${badAuthors === 1 ? ' has' : 's have'} a broken author name.` : '';
