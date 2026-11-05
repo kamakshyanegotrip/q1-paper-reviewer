@@ -888,7 +888,11 @@
     for (let attempt = 0; attempt < 3; attempt++) {
       const res = await fetch(url);
       if (res.ok) return res;
-      if (res.status !== 429 && res.status !== 503) throw new Error('HTTP ' + res.status);
+      if (res.status !== 429 && res.status !== 503) {
+        // The service's own reason is included, so the cause can be seen.
+        const why = (await res.text().catch(() => '')).replace(/\s+/g, ' ').slice(0, 200);
+        throw new Error('HTTP ' + res.status + (why ? ': ' + why : ''));
+      }
       await pause(4000 * (attempt + 1));
     }
     throw new Error('busy');
