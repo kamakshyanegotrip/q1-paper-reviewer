@@ -1778,7 +1778,6 @@
         const citedNow = citeKeysIn(after.text);
         const usedWorks = works.filter(w => { const k = workCiteKey(w); return !!k && citedNow.has(k); });
         const unusedWorks = works.filter(w => !usedWorks.includes(w));
-        restWorks = [...unusedWorks, ...restWorks];
         restKeys = new Set(restWorks.map(workKey));
         const refKeys = new Set((after.references || []).map(r => String(r.key || '').toLowerCase()));
         const noRef = [...citedNow].filter(k => !refKeys.has(k)).length;
@@ -1790,7 +1789,7 @@
         const batchText = restWorks.length
           ? `Batch ${runNo} done (${works.length} sources). ${restWorks.length} sources are still ${fromIncluded ? 'included' : 'ticked'}: ${leftBatches} batch${leftBatches === 1 ? '' : 'es'} left. Click Update for batch ${runNo + 1}.`
           : `Batch ${runNo} done (${works.length} sources). All batches for this section are done.`;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated. ${batchText}${checkText}`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated.${unusedWorks.length ? ` ${unusedWorks.length} not cited: left out of the queue and not marked Updated. They can be ticked again in the search list.` : ''} ${batchText}${checkText}`;
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const batchState = Object.assign({}, latest.secBatch || {}, { [sec.id]: { run: restWorks.length ? runNo : 0 } });
