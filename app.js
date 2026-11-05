@@ -1607,27 +1607,34 @@
       const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
       say('Updating this section with the selected sources. This can take a minute…');
       // No word limit on updates: the writer's revision is accepted as it comes, and each update can be run again.
-      let d = null, text = '', cov = { covered: 0, total: 0 }, added = 0, why = '';
-      const minAdded = Math.max(60, Math.round(before * 0.1));
-      for (let attempt = 0; attempt < 2; attempt++) {
-        if (attempt > 0) say(why === 'growth' ? 'The revision added too little new text. Revising once more…' : `Only ${cov.covered} of ${cov.total} sources were cited. Revising once more so each source is cited…`);
-        const extra = why === 'growth'
-          ? ` The section has ${before} words now. Keep all of it and add at least ${minAdded} new words: new sentences or paragraphs that state what the listed sources report, each cited in its sentence as {{cite:KEY}}.`
-          : ` Only ${cov.covered} of the ${cov.total} listed sources were cited in the previous version. Cite every listed source at least once, in the sentence it supports, written exactly as {{cite:KEY}} with its key from the Sources list.`;
-        const instr = attempt === 0 ? note : note + extra;
-        d = await apiPostForm(WRITE_PATH, Object.assign({}, base, { words: Math.max(1, before), existing, instruction: instr }));
-        if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
-        text = trTrimForeign(String(d.text || ''), sec.id);
-        if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
-        cov = citedCoverage(text, works);
-        added = wordCount(text) - before;
-        const citesOk = cov.total < 3 || (cov.covered >= cov.total * 0.5 && maxCitesInSentence(text) < 3);
-        why = added < minAdded && works.length ? 'growth' : (citesOk ? '' : 'cites');
-        if (!why) break;
+      // One writer call per selected source: each call must add a new paragraph for that source, so every source gets its own text.
+      // The section is passed through in turn; a call that adds no text is tried once more.
+      let d = null, cov = { covered: 0, total: 0 };
+      let text = existing, added = 0, sent = 0, refs = [], missed = [];
+      const cites = (w) => { const keys = workCiteKeys(w); return keys.length ? keys[0] : ''; };
+      for (let k = 0; k < works.length; k++) {
+        const w = works[k];
+        say(`Writing new text from source ${k + 1} of ${works.length}: ${String(w.title || '').slice(0, 80)}…`);
+        let wrote = false, d1 = null;
+        for (let attempt = 0; attempt < 2 && !wrote; attempt++) {
+          const extra = attempt === 0 ? '' : ' The previous attempt added no paragraph. Add it now.';
+          const instr = note + ` Write ONE new paragraph of two to four sentences, placed where it fits the section, that states what this source reports, and cite this source in that paragraph as {{cite:KEY}} using its exact key from the Sources list. Keep every existing paragraph exactly as it is.` + extra;
+          d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { works: JSON.stringify([w]), existing: text, words: Math.max(1, wordCount(text)), instruction: instr }));
+          if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
+          const next = trTrimForeign(String(d1.text || ''), sec.id);
+          if (next.trim() && wordCount(next) > wordCount(text)) { text = next; wrote = true; }
+        }
+        sent++;
+        if (d1 && d1.references) refs = mergeRefs(refs, d1.references);
+        if (!wrote) missed.push(w);
       }
+      if (text.trim() === String(existing).trim() || wordCount(text) <= before) throw new Error('The writer added no new paragraph from the selected sources, so the section was kept as it was.');
+      added = wordCount(text) - before;
+      cov = citedCoverage(text, works);
+      cov.missed = missed.length;
+      d = { references: refs, ok: true, sources: sent };
+      cov.sources = d.sources;
       cov.added = added;
-      // How many sources the writer received (the write engine counts them after filtering).
-      cov.sources = d && d.sources;
       // Read the saved draft again before saving: the writer call can take a minute, and other sections may have changed meanwhile.
       const latest = store.get(TR_KEY, {}) || {};
       const sectionsNow = Object.assign({}, latest.sections || {});
@@ -1785,7 +1792,7 @@
       const usedNow = new Set(cur.usedKeys || []);
       const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)) && usableAuthor(w));
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
-      const UPDATE_BATCH = 30;
+      const UPDATE_BATCH = 10;
       const works = allWorks.slice(0, UPDATE_BATCH);
       let restWorks = allWorks.slice(UPDATE_BATCH);
       let restKeys = new Set(restWorks.map(workKey));
