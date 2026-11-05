@@ -1735,7 +1735,9 @@
       if (!confirm('Clear the Included and Updated lists for this section?')) return;
       const cur = store.get(TR_KEY, {}) || {};
       const works = [...((cur.secUsedWorks || {})[id] || []), ...((cur.secIncluded || {})[id] || [])];
-      const removed = new Set(works.flatMap(workCiteKeys));
+      // Sources cleared earlier (kept in secCleared) are still offered for removal, so the text can be tied to them later.
+      const earlier = ((cur.secCleared || {})[id]) || [];
+      const removed = new Set([...works.flatMap(workCiteKeys), ...earlier]);
       const pick = obj => Object.assign({}, obj || {}, { [id]: [] });
       const patch = {
         secUsedWorks: pick(cur.secUsedWorks), secIncluded: pick(cur.secIncluded), secUsed: pick(cur.secUsed),
@@ -1748,7 +1750,11 @@
         const { text, references } = pruneBySources(sec.text, sec.references, removed);
         patch.secPrev = Object.assign({}, cur.secPrev || {}, { [id]: sec });
         patch.sections = Object.assign({}, cur.sections || {}, { [id]: { text, references } });
+        patch.secCleared = Object.assign({}, cur.secCleared || {}, { [id]: [] });
         msg = 'Included and Updated lists cleared, and the text written from these sources removed. Use Search again, show all results to see its works again.';
+      } else if (sec && removed.size) {
+        // Text kept: remember these sources so a later clear can still remove their text.
+        patch.secCleared = Object.assign({}, cur.secCleared || {}, { [id]: [...removed] });
       }
       saveJob(patch);
       renderTransform();
