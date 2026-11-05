@@ -1797,7 +1797,8 @@
         const badAuthors = (after.references || []).filter(r => badRefName(r.text)).length;
         const checkText = noRef || badAuthors ? ` Check: ${noRef} citation${noRef === 1 ? '' : 's'} have no reference; ${badAuthors} reference${badAuthors === 1 ? ' has' : 's have'} a broken author name.` : '';
         // Batch count for this section: the run number, and how many batches remain.
-        const runNo = (((store.get(TR_KEY, {}) || {}).secBatch || {})[sec.id] || { run: 0 }).run + 1;
+        // A missing or malformed counter starts at 0, so the batch number is never NaN.
+        const runNo = (Number((((store.get(TR_KEY, {}) || {}).secBatch || {})[sec.id] || {}).run) || 0) + 1;
         const leftBatches = Math.ceil(restWorks.length / UPDATE_BATCH);
         const batchText = restWorks.length
           ? `Batch ${runNo} done (${works.length} sources). ${restWorks.length} sources are still ${fromIncluded ? 'included' : 'ticked'}: ${leftBatches} batch${leftBatches === 1 ? '' : 'es'} left. Click Update for batch ${runNo + 1}.`
