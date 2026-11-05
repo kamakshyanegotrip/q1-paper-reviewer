@@ -1792,7 +1792,7 @@
       const usedNow = new Set(cur.usedKeys || []);
       const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)) && usableAuthor(w));
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
-      const UPDATE_BATCH = 10;
+      const UPDATE_BATCH = 1000;
       const works = allWorks.slice(0, UPDATE_BATCH);
       let restWorks = allWorks.slice(UPDATE_BATCH);
       let restKeys = new Set(restWorks.map(workKey));
