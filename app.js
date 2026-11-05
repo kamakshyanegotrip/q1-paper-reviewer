@@ -811,7 +811,7 @@
     return (cut < 0 ? lines : lines.slice(0, cut)).join('\n').trim();
   };
   // Keywords: each one is searched separately. Scope 'global' is the whole article; otherwise it is a section id.
-  const kwBox = (scope, list) => `<div style="margin:8px 0"><div style="display:flex;flex-wrap:wrap;gap:4px">${list.map((k, i) => `<span style="border:1px solid #d8d2c4;border-radius:12px;padding:2px 8px;font-size:13px">${esc(k)} <button type="button" data-kw-remove="${esc(scope)}|${i}" style="border:0;background:none;cursor:pointer" aria-label="Remove keyword">×</button></span>`).join('')}</div><div style="display:flex;gap:6px;margin-top:4px"><input type="text" data-kw-input="${esc(scope)}" placeholder="Keyword, e.g. visa policy (commas for several)" style="flex:1"><button class="btn btn-sm" type="button" data-kw-include="${esc(scope)}">Add keyword</button></div></div>`;
+  const kwBox = (scope, list) => `<div style="margin:8px 0"><div style="display:flex;flex-wrap:wrap;gap:4px">${list.map((k, i) => `<span style="border:1px solid #d8d2c4;border-radius:12px;padding:2px 8px;font-size:13px">${esc(k)} <button type="button" data-kw-remove="${esc(scope)}|${i}" style="border:0;background:none;cursor:pointer" aria-label="Remove keyword">×</button></span>`).join('')}</div><div style="display:flex;gap:6px;margin-top:4px"><input type="text" data-kw-input="${esc(scope)}" placeholder="Keyword, e.g. visa policy (commas for several)" style="flex:1"><button class="btn btn-sm" type="button" data-kw-include="${esc(scope)}">Add keyword</button>${list.length ? `<button class="btn btn-sm btn-ghost" type="button" data-kw-clear="${esc(scope)}">Clear all keywords</button>` : ''}</div></div>`;
   const TR_APPROACHES = { informative: 'Informative', analytical: 'Analytical', argumentative: 'Argumentative', descriptive: 'Descriptive', detailed: 'Detailed' };
   const TR_SRC_FILTERS = { articles: 'type:journal-article', reports: 'type:report', gov: 'type:report', other: 'type:book|dissertation|preprint' };
   const TR_TRUSTED = ['un tourism', 'unwto', 'world tourism organization', 'oecd', 'world health organization', 'who', 'world bank', 'international monetary fund', 'united nations', 'ministry of tourism', 'ministry of health and family welfare', 'niti aayog', 'invest india', 'ministry of external affairs', 'department of commerce', 'world travel & tourism council', 'wttc', 'iata', 'ficci', 'confederation of indian industry', 'cii'];
@@ -1864,6 +1864,11 @@
       const typed = String(((app.querySelector(`input[data-kw-input="${scope}"]`) || {}).value) || '').split(',').map(x => x.trim()).filter(Boolean);
       if (!typed.length) { setStatus('Type a keyword first.'); return; }
       kwSet(scope, [...new Set([...kwGet(scope), ...typed])]);
+    }));
+    app.querySelectorAll('[data-kw-clear]').forEach(b => b.addEventListener('click', () => {
+      const scope = b.dataset.kwClear;
+      if (!confirm('Remove all keywords here? Searches will then use the global keywords.')) return;
+      kwSet(scope, []);
     }));
     app.querySelectorAll('[data-kw-remove]').forEach(b => b.addEventListener('click', () => {
       const [scope, i] = b.dataset.kwRemove.split('|');
