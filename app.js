@@ -1741,11 +1741,14 @@
       // Sources cleared earlier (kept in secCleared) are still offered for removal, so the text can be tied to them later.
       const earlier = ((cur.secCleared || {})[id]) || [];
       const removed = new Set([...works.flatMap(workCiteKeys), ...earlier]);
+      const clearedKeys = new Set([...removed, ...works.map(workKey), ...earlier]);
       const pick = obj => Object.assign({}, obj || {}, { [id]: [] });
       const patch = {
         secUsedWorks: pick(cur.secUsedWorks), secIncluded: pick(cur.secIncluded), secUsed: pick(cur.secUsed),
         secBatch: Object.assign({}, cur.secBatch || {}, { [id]: { run: 0 } }), secNotes: pick(cur.secNotes), secSeen: pick(cur.secSeen), foundPicks: pick(cur.foundPicks),
-        usedKeys: (cur.usedKeys || []).filter(k => !removed.has(k))
+        // Cleared sources are fresh again: they leave the used and seen lists, so a new search can find them.
+        usedKeys: (cur.usedKeys || []).filter(k => !clearedKeys.has(k)),
+        seenKeys: (cur.seenKeys || []).filter(k => !clearedKeys.has(k))
       };
       let msg = 'Included and Updated lists cleared for this section. The text is kept.';
       const sec = (cur.sections || {})[id];
