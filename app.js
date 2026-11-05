@@ -1821,8 +1821,9 @@
       const cur = store.get(TR_KEY, {}) || {};
       const found = (cur.found || {})[sec.id] || [], picks = (cur.foundPicks || {})[sec.id] || [];
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
-      const usedNow = new Set(cur.usedKeys || []);
-      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !usedNow.has(workKey(w)) && usableAuthor(w));
+      // A source is skipped only when its citation is already in this section's text, not because an earlier run sent it.
+      const citedNow = citeKeysIn(((cur.sections || {})[sec.id] || {}).text || '');
+      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !workCiteKeys(w).some(k => citedNow.has(k)) && usableAuthor(w));
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
       const UPDATE_BATCH = 1000;
       const works = allWorks.slice(0, UPDATE_BATCH);
