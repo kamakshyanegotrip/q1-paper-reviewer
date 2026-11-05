@@ -1628,21 +1628,19 @@
       let d = null, cov = { covered: 0, total: 0 };
       let text = existing, added = 0, sent = 0, refs = [], missed = [];
       const cites = (w) => { const keys = workCiteKeys(w); return keys.length ? keys[0] : ''; };
-      for (let k = 0; k < works.length; k++) {
-        const w = works[k];
-        say(`Writing new text from source ${k + 1} of ${works.length}: ${String(w.title || '').slice(0, 80)}…`);
-        let wrote = false, d1 = null;
-        for (let attempt = 0; attempt < 2 && !wrote; attempt++) {
-          const extra = attempt === 0 ? '' : ' The previous attempt added no paragraph. Add it now.';
-          const instr = note + ` Write ONE new paragraph of two to four sentences, placed where it fits the section, that states what this source reports, and cite this source in that paragraph as {{cite:KEY}} using its exact key from the Sources list. Keep every existing paragraph exactly as it is.` + extra;
-          d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { works: JSON.stringify([w]), existing: text, words: Math.max(1, wordCount(text)), instruction: instr }));
-          if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
-          const next = trTrimForeign(String(d1.text || ''), sec.id);
-          if (next.trim() && wordCount(next) > wordCount(text)) { text = next; wrote = true; }
-        }
-        sent++;
-        if (d1 && d1.references) refs = mergeRefs(refs, d1.references);
-        if (!wrote) missed.push(w);
+      // One short paragraph per set of up to SET_SIZE sources. The writer returns only that paragraph,
+      // and it is added at the end of the section, so the rest of the text cannot be shortened.
+      const SET_SIZE = 10;
+      for (let k = 0; k < works.length; k += SET_SIZE) {
+        const chunk = works.slice(k, k + SET_SIZE);
+        say(`Writing a paragraph for sources ${k + 1} to ${Math.min(k + SET_SIZE, works.length)} of ${works.length}…`);
+        const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text, instruction: note }));
+        if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
+        const para = trTrimForeign(String(d1.text || ''), sec.id).replace(/^#+\s.*$/gm, '').trim();
+        sent += chunk.length;
+        if (d1.references) refs = mergeRefs(refs, d1.references);
+        if (para && wordCount(para) >= 15) text = text.trim() + '\n\n' + para;
+        else missed.push(...chunk);
       }
       if (text.trim() === String(existing).trim() || wordCount(text) <= before) throw new Error('The writer added no new paragraph from the selected sources, so the section was kept as it was.');
       added = wordCount(text) - before;

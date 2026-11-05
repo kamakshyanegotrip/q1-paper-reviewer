@@ -159,6 +159,8 @@ const revise = b.action === 'revise';
 const para = b.action === 'paragraph';
 // Transform: rewrite a section of an uploaded article into the target format, with the sources the user picked.
 const transform = b.action === 'transform';
+// One paragraph for a set of sources (action: addset): the writer returns only that paragraph, and the app adds it to the section.
+const setPara = b.action === 'addset';
 // Relevance check: the writer judges each found work against this section (action: verify). No text is written.
 if (b.action === 'verify') {
   let items = [];
@@ -179,9 +181,9 @@ if (b.action === 'verify') {
   return [{ json: { prompt: lines.join('\\n'), verify: true, verifyKeys: items.map(w => w.key), early: null, words: 0, kept: [], searched: 0, sourceErrors: [] } }];
 }
 let works = [];
-if (transform) {
+if (transform || setPara) {
   try { works = JSON.parse(b.works || '[]'); } catch (e) { return [{ json: { early: { ok: false, reason: 'The selected literature could not be read' } } }]; }
-  if (!String(b.source || '').trim()) return [{ json: { early: { ok: false, reason: 'Paste or upload the article to transform first' } } }];
+  if (transform && !String(b.source || '').trim()) return [{ json: { early: { ok: false, reason: 'Paste or upload the article to transform first' } } }];
 }
 const point = String(b.point || '').slice(0, 1000);
 if (para && !point.trim())
@@ -192,7 +194,7 @@ if (revise) {
   if (!P.REVISE_MODES[b.mode]) return [{ json: { early: { ok: false, reason: 'Choose how to revise: connect, discuss or cite' } } }];
   if (!P.MODIFICATIONS[b.modification]) return [{ json: { early: { ok: false, reason: 'Choose a modification type first' } } }];
   if (b.mode === 'discuss' && !String(b.instruction || '').trim()) return [{ json: { early: { ok: false, reason: 'Write the instruction for the AI first' } } }];
-} else if (!para && !transform && !points.trim()) {
+} else if (!para && !transform && !setPara && !points.trim()) {
   return [{ json: { early: { ok: false, reason: 'Add the content points for this section first' } } }];
 }
 
@@ -216,14 +218,16 @@ if (!transform && (revise ? b.mode === 'cite' : (para || sec.fixed == null))) {
     await run('grey', () => GREY.search(q, { yearFrom: null, perPage: 25, mailto: MAILTO }, fetchJson));
   }
 }
-if (transform) for (const w of works.slice(0, 60)) { try { records.push(OA.normalizeWork(w)); } catch (e) { errors.push('work: ' + e.message); } }
+if (transform || setPara) for (const w of works.slice(0, 60)) { try { records.push(OA.normalizeWork(w)); } catch (e) { errors.push('work: ' + e.message); } }
 // Sources the user picked are not dropped for a missing method statement; they are the user's choice.
-const filt = F.filterSources(records, { types: ['article', 'review', 'conference', 'grey'], yearFrom: null, minCitations: null, dropRetracted: true, dedupe: true, greyNeedsMethod: !transform });
+const filt = F.filterSources(records, { types: ['article', 'review', 'conference', 'grey'], yearFrom: null, minCitations: null, dropRetracted: true, dedupe: true, greyNeedsMethod: !(transform || setPara) });
 const kept = filt.kept || [];
 const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';
 const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
-const prompt = transform
+const prompt = setPara
+  ? P.buildSetParagraphPrompt({ section, sourcesText, existing: String(b.existing || ''), instruction: String(b.instruction || ''), project })
+  : transform
   ? P.buildTransformPrompt({ type, section, words, source: String(b.source || ''), prior, sourcesText, project, existing: String(b.existing || '').slice(0, 60000), instruction: String(b.instruction || '').slice(0, 1000), approach: String(b.approach || '').slice(0, 40), style: String(b.style || '').slice(0, 20) })
   : para
   ? P.buildParagraphPrompt({ type, section, point, words, prior: priorParas, hint, sourcesText, style: String(b.style || ''), project, position: Number(b.position) || 1, total: Number(b.total) || 1 })
