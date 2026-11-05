@@ -1600,9 +1600,12 @@
         cov = citedCoverage(text, works);
         if (cov.total < 3 || (cov.covered >= cov.total * 0.5 && maxCitesInSentence(text) < 3)) break;
       }
-      const prevSection = sections[sec.id] || null;
-      sections[sec.id] = { text, references: mergeRefs((sections[sec.id] || {}).references, d.references || []) };
-      if (!saveJob({ sections, secPrev: prevSection ? Object.assign({}, (store.get(TR_KEY, {}) || {}).secPrev || {}, { [sec.id]: prevSection }) : ((store.get(TR_KEY, {}) || {}).secPrev || {}) })) throw new Error(STORAGE_FULL_MSG);
+      // Read the saved draft again before saving: the writer call can take a minute, and other sections may have changed meanwhile.
+      const latest = store.get(TR_KEY, {}) || {};
+      const sectionsNow = Object.assign({}, latest.sections || {});
+      const prevSection = sectionsNow[sec.id] || null;
+      sectionsNow[sec.id] = { text, references: mergeRefs((prevSection || {}).references, d.references || []) };
+      if (!saveJob({ sections: sectionsNow, secPrev: prevSection ? Object.assign({}, latest.secPrev || {}, { [sec.id]: prevSection }) : (latest.secPrev || {}) })) throw new Error(STORAGE_FULL_MSG);
       return cov;
     };
     app.querySelectorAll('[data-tr-restore]').forEach(b => b.addEventListener('click', () => {
