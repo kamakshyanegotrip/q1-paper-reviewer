@@ -1607,17 +1607,25 @@
       const say = t => { const el = app.querySelector(`[data-sec-note="${sec.id}"]`); if (el) el.textContent = t; setStatus(t); };
       say('Updating this section with the selected sources. This can take a minute…');
       // No word limit on updates: the writer's revision is accepted as it comes, and each update can be run again.
-      let d = null, text = '', cov = { covered: 0, total: 0 };
+      let d = null, text = '', cov = { covered: 0, total: 0 }, added = 0, why = '';
+      const minAdded = Math.max(60, Math.round(before * 0.1));
       for (let attempt = 0; attempt < 2; attempt++) {
-        if (attempt > 0) say(`Only ${cov.covered} of ${cov.total} sources were cited. Revising once more so each source is cited…`);
-        const instr = attempt === 0 ? note : note + ` Only ${cov.covered} of the ${cov.total} listed sources were cited in the previous version. Cite every listed source at least once, in the sentence it supports, written exactly as {{cite:KEY}} with its key from the Sources list.`;
+        if (attempt > 0) say(why === 'growth' ? 'The revision added too little new text. Revising once more…' : `Only ${cov.covered} of ${cov.total} sources were cited. Revising once more so each source is cited…`);
+        const extra = why === 'growth'
+          ? ` The section has ${before} words now. Keep all of it and add at least ${minAdded} new words: new sentences or paragraphs that state what the listed sources report, each cited in its sentence as {{cite:KEY}}.`
+          : ` Only ${cov.covered} of the ${cov.total} listed sources were cited in the previous version. Cite every listed source at least once, in the sentence it supports, written exactly as {{cite:KEY}} with its key from the Sources list.`;
+        const instr = attempt === 0 ? note : note + extra;
         d = await apiPostForm(WRITE_PATH, Object.assign({}, base, { words: Math.max(1, before), existing, instruction: instr }));
         if (!d.ok) throw new Error(d.reason || 'The section could not be revised.');
         text = trTrimForeign(String(d.text || ''), sec.id);
         if (!text.trim()) throw new Error('The writer returned no text, so the section was kept as it was. Try again.');
         cov = citedCoverage(text, works);
-        if (cov.total < 3 || (cov.covered >= cov.total * 0.5 && maxCitesInSentence(text) < 3)) break;
+        added = wordCount(text) - before;
+        const citesOk = cov.total < 3 || (cov.covered >= cov.total * 0.5 && maxCitesInSentence(text) < 3);
+        why = added < minAdded && works.length ? 'growth' : (citesOk ? '' : 'cites');
+        if (!why) break;
       }
+      cov.added = added;
       // Read the saved draft again before saving: the writer call can take a minute, and other sections may have changed meanwhile.
       const latest = store.get(TR_KEY, {}) || {};
       const sectionsNow = Object.assign({}, latest.sections || {});
@@ -1792,7 +1800,7 @@
         const batchText = restWorks.length
           ? `Batch ${runNo} done (${works.length} sources). ${restWorks.length} sources are still ${fromIncluded ? 'included' : 'ticked'}: ${leftBatches} batch${leftBatches === 1 ? '' : 'es'} left. Click Update for batch ${runNo + 1}.`
           : `Batch ${runNo} done (${works.length} sources). All batches for this section are done.`;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated.${unusedWorks.length ? ` ${unusedWorks.length} not cited: left out of the queue and not marked Updated. They can be ticked again in the search list.` : ''} ${batchText}${checkText}`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words (${cov.added >= 0 ? '+' : ''}${cov.added} in this run), ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated.${unusedWorks.length ? ` ${unusedWorks.length} not cited: left out of the queue and not marked Updated. They can be ticked again in the search list.` : ''} ${batchText}${checkText}`;
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const batchState = Object.assign({}, latest.secBatch || {}, { [sec.id]: { run: restWorks.length ? runNo : 0 } });
