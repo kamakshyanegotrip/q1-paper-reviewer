@@ -898,25 +898,32 @@
   let oaBusyUntil = 0;
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
-    let oaBusy = false;
+    let oaBusy = false, fbFailed = false;
+    // A free source that fails is recorded, so the message can tell "busy" from "nothing found".
+    const fallback = async fn => { try { return await fn(); } catch (e) { fbFailed = true; return []; } };
     for (const t of srcTypes) {
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
       let res = [];
-      if (Date.now() < oaBusyUntil) oaBusy = true;
+      let oaFailed = false;
+      if (Date.now() < oaBusyUntil) oaFailed = true;
       else try {
         const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
         res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
         if (t === 'gov') res = res.filter(isTrustedWork);
       } catch (err) {
-        // OpenAlex is busy: the free Crossref and Europe PMC sources below still run, and OpenAlex is skipped for the next 2 minutes.
-        oaBusy = true; oaBusyUntil = Date.now() + 120000;
+        // OpenAlex is busy: OpenAlex is skipped for the next 2 minutes.
+        oaFailed = true; oaBusyUntil = Date.now() + 120000;
       }
-      if (t === 'articles') res = res.concat(await crossrefSearch(query, year).catch(() => []));
-      if (t === 'other') res = res.concat(await europePmcSearch(query, year).catch(() => []));
+      if (oaFailed) oaBusy = true;
+      // Free sources: Crossref always runs for articles; when OpenAlex is busy it also stands in for reports (not for trusted government sources).
+      if (t === 'articles' || (oaFailed && t === 'reports')) res = res.concat(await fallback(() => crossrefSearch(query, year)));
+      if (t === 'other') res = res.concat(await fallback(() => europePmcSearch(query, year)));
       res.slice(0, 12).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
     }
-    if (!out.length && oaBusy) throw new Error('The literature services are busy right now. Wait a minute, then search again.');
+    if (!out.length && oaBusy) throw new Error(fbFailed
+      ? 'The literature services are busy right now. Wait a minute, then search again.'
+      : 'OpenAlex is busy, and the free sources found nothing for these words. Try different keywords, or search again in a minute.');
     return out;
   }
   const mergeRefs = (a = [], b = []) => { const out = [...a]; b.forEach(r => { if (!out.some(q => q.text === r.text)) out.push(r); }); return out; };
