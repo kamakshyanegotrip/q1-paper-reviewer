@@ -1206,7 +1206,7 @@
         : '<div class="muted" style="font-size:13px">None yet.</div>';
       const btn = 'class="btn btn-sm" type="button"';
       return `
-        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
+        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button> <button ${btn} data-tr-fresh="${esc(s.id)}">Search again, show all results</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         ${citationsHtml(s.id)}
         <button hidden data-tr-apply="${esc(s.id)}">Update</button>
@@ -1631,6 +1631,12 @@
       }
       return out;
     };
+    // Clears this section's memory of works shown before, then searches again, so every result is shown. Excluded and used works stay hidden.
+    app.querySelectorAll('[data-tr-fresh]').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.trFresh; const cur = store.get(TR_KEY, {}) || {};
+      saveJob({ secSeen: Object.assign({}, cur.secSeen || {}, { [id]: [] }) });
+      const f = app.querySelector(`[data-tr-find="${id}"]`); if (f) f.click();
+    }));
     app.querySelectorAll('[data-tr-find]').forEach(b => b.addEventListener('click', async () => {
       const sec = secs.find(x => x.id === b.dataset.trFind);
       try {
