@@ -1224,7 +1224,7 @@
         : '<div class="muted" style="font-size:13px">None yet.</div>';
       const btn = 'class="btn btn-sm" type="button"';
       return `
-        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button> <button ${btn} data-tr-fresh="${esc(s.id)}">Search again, show all results</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
+        <div style="margin-top:8px"><button ${btn} data-tr-find="${esc(s.id)}">Search literature</button> <button ${btn} data-tr-fresh="${esc(s.id)}">Search again, show all results</button> <button ${btn} data-tr-clearlist="${esc(s.id)}">Clear included and updated</button>${(job.secPrev || {})[s.id] ? ` <button ${btn} data-tr-restore="${esc(s.id)}">Restore previous version</button>` : ''}</div>
         <div class="muted" data-sec-note="${esc(s.id)}" role="status" aria-live="polite" style="font-size:14px;font-weight:600;min-height:1em;margin:6px 0;padding:6px 8px;border-radius:6px;background:#f4f1e8">${esc((job.secNotes || {})[s.id] || '')}</div>
         ${citationsHtml(s.id)}
         <button hidden data-tr-apply="${esc(s.id)}">Update</button>
@@ -1707,6 +1707,21 @@
       c.checked ? set.add(Number(idx)) : set.delete(Number(idx));
       const fp = Object.assign({}, cur.foundPicks || {}); fp[sid] = [...set].sort((a, b) => a - b);
       saveJob({ foundPicks: fp });
+    }));
+    // Empties this section's Included and Updated lists and its search memory. The section text is kept.
+    app.querySelectorAll('[data-tr-clearlist]').forEach(b => b.addEventListener('click', () => {
+      const id = b.dataset.trClearlist;
+      if (!confirm('Clear the Included and Updated lists for this section? The section text is kept.')) return;
+      const cur = store.get(TR_KEY, {}) || {};
+      const removed = new Set([...((cur.secUsedWorks || {})[id] || []), ...((cur.secIncluded || {})[id] || [])].map(workKey));
+      const pick = obj => Object.assign({}, obj || {}, { [id]: [] });
+      saveJob({
+        secUsedWorks: pick(cur.secUsedWorks), secIncluded: pick(cur.secIncluded), secUsed: pick(cur.secUsed),
+        secBatch: pick(cur.secBatch), secNotes: pick(cur.secNotes), secSeen: pick(cur.secSeen), foundPicks: pick(cur.foundPicks),
+        usedKeys: (cur.usedKeys || []).filter(k => !removed.has(k))
+      });
+      renderTransform();
+      noteFor(id, 'Included and Updated lists cleared for this section. The text is kept. Use Search again, show all results to see its works again.');
     }));
     app.querySelectorAll('[data-tr-selall]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trSelall;
