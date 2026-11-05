@@ -215,7 +215,8 @@ if (!transform && (revise ? b.mode === 'cite' : (para || sec.fixed == null))) {
   }
 }
 if (transform) for (const w of works.slice(0, 60)) { try { records.push(OA.normalizeWork(w)); } catch (e) { errors.push('work: ' + e.message); } }
-const filt = F.filterSources(records, { types: ['article', 'review', 'conference', 'grey'], yearFrom: null, minCitations: null, dropRetracted: true, dedupe: true });
+// Sources the user picked are not dropped for a missing method statement; they are the user's choice.
+const filt = F.filterSources(records, { types: ['article', 'review', 'conference', 'grey'], yearFrom: null, minCitations: null, dropRetracted: true, dedupe: true, greyNeedsMethod: !transform });
 const kept = filt.kept || [];
 const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';

@@ -13,7 +13,8 @@ const DEFAULTS = {
   foundationalCitations: 500,                           // threshold for "foundational" flag
   minTier: null,                                        // e.g. {sjrQuartile:'Q2', scopusActive:true}
   minCitations: null,                                   // off unless user sets it
-  minRelevance: null                                    // off unless user sets it (0..1)
+  minRelevance: null,                                   // off unless user sets it (0..1)
+  greyNeedsMethod: true                                 // grey sources must state a method (off for sources the user picked)
 };
 
 const QRANK = { Q1: 1, Q2: 2, Q3: 3, Q4: 4 };
@@ -50,7 +51,7 @@ function filterSources(records, userFilters) {
     }
     if (f.dropRetracted && s.retracted) { excl(s, 'retracted'); continue; }
     if (!f.types.includes(type)) { excl(s, 'type:' + type); continue; }
-    if (s.isGrey && !String(s.method || '').trim() && !s.trustedPublisher) { excl(s, 'grey-no-method'); continue; }   // grey sources must state a method, or come from an allowlisted government/industry publisher
+    if (f.greyNeedsMethod && s.isGrey && !String(s.method || '').trim() && !s.trustedPublisher) { excl(s, 'grey-no-method'); continue; }   // grey sources must state a method, or come from an allowlisted government/industry publisher
     if (f.yearFrom && s.year && s.year < f.yearFrom) {
       if (!(f.foundationalExempt && isFoundational)) { excl(s, 'before-year-range'); continue; }
     }
