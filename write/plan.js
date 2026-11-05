@@ -237,7 +237,21 @@
     return lines.filter(x => x !== '').join('\n');
   }
 
-  const api = { APPROACH_BRIEF, buildTransformPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
+  // One short paragraph that states what a set of sources report together, for the section. The app adds it to the section.
+  function buildSetParagraphPrompt({ section, sourcesText = '', existing = '', instruction = '', project = {} }) {
+    const lines = [
+      'You write one new paragraph for an academic document. The app adds it to the section below.',
+      'Document: ' + (project.title || '(not given)'),
+      'Section: ' + section + '. ' + String(instruction || '').slice(0, 500),
+      'Write ONE paragraph of three to five sentences. It states what the listed sources report together, on the topic of this section, in the same style as the section.',
+      'Cite each listed source in the paragraph as {{cite:KEY}} using its exact key from the Sources list. Cite no other source. Use at most two citations per sentence.',
+      'Output only that paragraph. Do not output the section, a heading, a list or commentary. Do not invent facts, citations or keys.',
+      sourcesText ? 'Sources:\n' + sourcesText : 'Sources: none listed.',
+      'Section for context only (do not repeat it):\n' + clip(String(existing), 20000)
+    ];
+    return lines.join('\n');
+  }
+  const api = { APPROACH_BRIEF, buildTransformPrompt, buildSetParagraphPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);
