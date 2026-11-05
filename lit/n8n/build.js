@@ -38,6 +38,8 @@ let text = '', error = '';
 if (!prep.early) {
   if (out.error) error = String(out.error.message || JSON.stringify(out.error)).slice(0, 300);
   else text = ((out.candidates && out.candidates[0] && out.candidates[0].content && out.candidates[0].content.parts) || []).map(p => p.text || '').join('');
+  // A reply cut off at the length limit would shorten the section, so it is not used.
+  if (!error && out.candidates && out.candidates[0] && out.candidates[0].finishReason === 'MAX_TOKENS') error = 'The writer reply was cut off at its length limit, so the section was not changed.';
 }
 const result = finishLiterature({ prep, text, error });
 return [{ json: Object.assign({}, result, { searched: prep.searched, sourceErrors: prep.sourceErrors }) }];
@@ -110,7 +112,7 @@ function workflow() {
           method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
           authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
           sendBody: true, specifyBody: 'json',
-          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 8000, temperature: 0.2 } } }}",
+          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 32000, temperature: 0.2 } } }}",
           options: {} },
         id: 'lit-gemini', name: 'Gemini draft', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [500, 200], continueOnFail: true },
       { parameters: { jsCode: SHIM + bundle() + '\n' + FINISH },
@@ -254,6 +256,8 @@ if (prep.verify) {
 if (!prep.early) {
   if (out.error) error = String(out.error.message || JSON.stringify(out.error)).slice(0, 300);
   else text = ((out.candidates && out.candidates[0] && out.candidates[0].content && out.candidates[0].content.parts) || []).map(p => p.text || '').join('');
+  // A reply cut off at the length limit would shorten the section, so it is not used.
+  if (!error && out.candidates && out.candidates[0] && out.candidates[0].finishReason === 'MAX_TOKENS') error = 'The writer reply was cut off at its length limit, so the section was not changed.';
 }
 const result = finishLiterature({ prep, text, error });
 const draft = result.draft || '';
@@ -288,7 +292,7 @@ function writeWorkflow() {
           method: 'POST', url: 'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent',
           authentication: 'predefinedCredentialType', nodeCredentialType: 'googlePalmApi',
           sendBody: true, specifyBody: 'json',
-          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 8000, temperature: 0.2 } } }}",
+          jsonBody: "={{ { contents: [{ parts: [{ text: $json.prompt || '' }] }], generationConfig: { maxOutputTokens: 32000, temperature: 0.2 } } }}",
           options: {} },
         id: 'write-gemini', name: 'Write draft', type: 'n8n-nodes-base.httpRequest', typeVersion: 4.2, position: [760, 200], continueOnFail: true,
         credentials: { googlePalmApi: { id: 'LStJQsuDBA7AC8nh', name: 'Google Gemini(PaLM) Api account' } } },
