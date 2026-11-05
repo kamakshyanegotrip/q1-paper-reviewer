@@ -856,6 +856,18 @@
   function workCiteKeys(w) { return [w.doi, w.id, 'ty:' + String(w.title || '').slice(0, 60)].map(nkey).filter(k => k && k !== 'ty:'); }
   // A reference whose first author is a single letter, empty or "Unknown" cannot be cited properly.
   function badRefName(text) { const s = String(text || '').trim().split(',')[0].replace(/[^A-Za-zÀ-ž]/g, ''); return s.length < 3 || /unknown/i.test(s); }
+  // Removes the text written from the given sources (keys compared with nkey). A paragraph that cites only those sources is dropped;
+  // in other paragraphs only their citation markers are removed. References for those sources are removed too.
+  function pruneBySources(text, references, removed) {
+    const marker = /\{\{cite:([^}]+)\}\}/g;
+    const kept = [];
+    String(text || '').split(/\n{2,}/).forEach(p => {
+      const keys = [...p.matchAll(marker)].map(m => nkey(m[1]));
+      if (keys.length && keys.every(k => removed.has(k))) return;
+      kept.push(keys.some(k => removed.has(k)) ? p.replace(marker, (m, k) => (removed.has(nkey(k)) ? '' : m)).replace(/ {2,}/g, ' ').replace(/ ([.,;:])/g, '$1') : p);
+    });
+    return { text: kept.join('\n\n'), references: (references || []).filter(r => !removed.has(nkey(r.key))) };
+  }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -1715,20 +1727,32 @@
       const fp = Object.assign({}, cur.foundPicks || {}); fp[sid] = [...set].sort((a, b) => a - b);
       saveJob({ foundPicks: fp });
     }));
-    // Empties this section's Included and Updated lists and its search memory. The section text is kept.
+    // Clears this section's Included and Updated lists and its search memory.
+    // Optionally, the text written from those sources is removed too: a paragraph that cites only those sources is dropped,
+    // and their citation markers and references are removed from paragraphs that also cite other sources.
     app.querySelectorAll('[data-tr-clearlist]').forEach(b => b.addEventListener('click', () => {
       const id = b.dataset.trClearlist;
-      if (!confirm('Clear the Included and Updated lists for this section? The section text is kept.')) return;
+      if (!confirm('Clear the Included and Updated lists for this section?')) return;
       const cur = store.get(TR_KEY, {}) || {};
-      const removed = new Set([...((cur.secUsedWorks || {})[id] || []), ...((cur.secIncluded || {})[id] || [])].map(workKey));
+      const works = [...((cur.secUsedWorks || {})[id] || []), ...((cur.secIncluded || {})[id] || [])];
+      const removed = new Set(works.flatMap(workCiteKeys));
       const pick = obj => Object.assign({}, obj || {}, { [id]: [] });
-      saveJob({
+      const patch = {
         secUsedWorks: pick(cur.secUsedWorks), secIncluded: pick(cur.secIncluded), secUsed: pick(cur.secUsed),
-        secBatch: pick(cur.secBatch), secNotes: pick(cur.secNotes), secSeen: pick(cur.secSeen), foundPicks: pick(cur.foundPicks),
+        secBatch: Object.assign({}, cur.secBatch || {}, { [id]: { run: 0 } }), secNotes: pick(cur.secNotes), secSeen: pick(cur.secSeen), foundPicks: pick(cur.foundPicks),
         usedKeys: (cur.usedKeys || []).filter(k => !removed.has(k))
-      });
+      };
+      let msg = 'Included and Updated lists cleared for this section. The text is kept.';
+      const sec = (cur.sections || {})[id];
+      if (sec && removed.size && confirm('Also remove the text written from these sources? Paragraphs that cite only these sources are removed, and their citations are taken out of the others. Cancel keeps the text.')) {
+        const { text, references } = pruneBySources(sec.text, sec.references, removed);
+        patch.secPrev = Object.assign({}, cur.secPrev || {}, { [id]: sec });
+        patch.sections = Object.assign({}, cur.sections || {}, { [id]: { text, references } });
+        msg = 'Included and Updated lists cleared, and the text written from these sources removed. Use Search again, show all results to see its works again.';
+      }
+      saveJob(patch);
       renderTransform();
-      noteFor(id, 'Included and Updated lists cleared for this section. The text is kept. Use Search again, show all results to see its works again.');
+      noteFor(id, msg);
     }));
     app.querySelectorAll('[data-tr-selall]').forEach(b => b.addEventListener('click', () => {
       const sid = b.dataset.trSelall;
