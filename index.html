@@ -53,6 +53,11 @@
         <input type="url" id="setApi" placeholder="https://…/webhook">
         <small>The n8n webhook base. Leave as-is unless you moved the workflow.</small>
       </label>
+      <label class="field">
+        <span>OpenAlex API key (optional)</span>
+        <input type="text" id="setOaKey" autocomplete="off" placeholder="Paste your OpenAlex key">
+        <small>Stored in this browser only. Lets literature searches run without the shared free limit.</small>
+      </label>
       <p class="settings-status" id="settingsStatus" role="status"></p>
       <div class="dialog-actions">
         <button type="button" class="btn btn-ghost" id="testKeyBtn">Test connection</button>
@@ -69,6 +74,6 @@
   <script src="write/templates.js"></script>
   <script src="write/plan.js"></script>
   <script src="lit/fromReview.js"></script>
-  <script src="app.js?v=2026-11-05a"></script>
+  <script src="app.js?v=2026-11-05b"></script>
 </body>
 </html>
