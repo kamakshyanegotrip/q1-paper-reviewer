@@ -1748,7 +1748,9 @@
         secBatch: Object.assign({}, cur.secBatch || {}, { [id]: { run: 0 } }), secNotes: pick(cur.secNotes), secSeen: pick(cur.secSeen), foundPicks: pick(cur.foundPicks),
         // Cleared sources are fresh again: they leave the used and seen lists, so a new search can find them.
         usedKeys: (cur.usedKeys || []).filter(k => !clearedKeys.has(k)),
-        seenKeys: (cur.seenKeys || []).filter(k => !clearedKeys.has(k))
+        seenKeys: (cur.seenKeys || []).filter(k => !clearedKeys.has(k)),
+        // The shared Included list also holds these sources; a new search skips anything in it, so they leave it too.
+        included: (cur.included || []).filter(w => !clearedKeys.has(workKey(w)))
       };
       let msg = 'Included and Updated lists cleared for this section. The text is kept.';
       const sec = (cur.sections || {})[id];
