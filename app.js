@@ -1613,7 +1613,8 @@
     const reviseSection = async (sec, instruction, works) => {
       const cur = store.get(TR_KEY, {}) || {};
       const sections = Object.assign({}, cur.sections || {});
-      const existing = trTrimForeign((sections[sec.id] || {}).text || '', sec.id);
+      // The saved text is used as it is. Trimming it at other chapters' headings dropped the earlier phases' paragraphs on every run.
+      const existing = (sections[sec.id] || {}).text || '';
       const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
       const before = wordCount(existing);
       const t = cur.type || 'empirical:q1';
