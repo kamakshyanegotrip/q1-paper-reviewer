@@ -862,7 +862,7 @@
   // Crossref (journal articles) and Europe PMC (biomedical and health repositories), reshaped like OpenAlex works so the writer can read them.
   async function crossrefSearch(query, year) {
     const filter = ['type:journal-article', year ? `from-pub-date:${year}-01-01` : ''].filter(Boolean).join(',');
-    const d = await (await fetch('https://api.crossref.org/works?' + new URLSearchParams({ query, rows: '8', filter }).toString())).json();
+    const d = await (await getWithRetry('https://api.crossref.org/works?' + new URLSearchParams({ query, rows: '8', filter }).toString())).json();
     return ((d.message && d.message.items) || []).map(it => ({
       id: 'doi:' + (it.DOI || it.URL || it.title), doi: it.DOI ? 'https://doi.org/' + it.DOI : null,
       title: (it.title || [''])[0], publication_year: ((((it.issued || {})['date-parts'] || [[]])[0]) || [])[0] || null,
@@ -873,7 +873,7 @@
   }
   async function europePmcSearch(query, year) {
     const q = year ? `${query} AND PUB_YEAR:[${year} TO 2100]` : query;
-    const d = await (await fetch('https://www.ebi.ac.uk/europepmc/webservices/rest/search?' + new URLSearchParams({ query: q, format: 'json', pageSize: '8', resultType: 'core' }).toString())).json();
+    const d = await (await getWithRetry('https://www.ebi.ac.uk/europepmc/webservices/rest/search?' + new URLSearchParams({ query: q, format: 'json', pageSize: '8', resultType: 'core' }).toString())).json();
     return ((d.resultList && d.resultList.result) || []).map(r => ({
       id: 'epmc:' + (r.doi || r.pmid || r.id || r.title), doi: r.doi ? 'https://doi.org/' + r.doi : null,
       title: r.title || '', publication_year: Number(r.pubYear) || null,
@@ -882,25 +882,23 @@
       type: 'article', cited_by_count: r.citedByCount || 0, abstract_inverted_index: null, is_retracted: false
     })).filter(w => usableTitle(w.title));
   }
-  // The literature service rate-limits (HTTP 429). Wait and retry; if it stays busy, say so instead of showing "no results".
+  // Busy (429) or unavailable (503) responses are retried with a longer wait each time. Other errors are reported with their status.
+  const pause = ms => new Promise(r => setTimeout(r, ms));
   async function getWithRetry(url) {
     for (let attempt = 0; attempt < 3; attempt++) {
       const res = await fetch(url);
-      if (res.status !== 429) {
-        if (!res.ok) throw new Error('The literature service returned an error (HTTP ' + res.status + '). Try again shortly.');
-        return res;
-      }
-      await new Promise(r => setTimeout(r, 5000 * (attempt + 1)));
+      if (res.ok) return res;
+      if (res.status !== 429 && res.status !== 503) throw new Error('HTTP ' + res.status);
+      await pause(4000 * (attempt + 1));
     }
-    throw new Error('The literature service is busy (rate limit). Wait a minute, then search again.');
+    throw new Error('busy');
   }
   // After OpenAlex is found busy, skip it for a while so the other keywords do not each wait for it again.
   let oaBusyUntil = 0;
   async function findLiterature(query, srcTypes, year) {
     const seen = new Set(), out = [];
-    let oaBusy = false, fbFailed = false;
-    // A free source that fails is recorded, so the message can tell "busy" from "nothing found".
-    const fallback = async fn => { try { return await fn(); } catch (e) { fbFailed = true; return []; } };
+    let oaBusy = false, fbFailed = false, lastErr = '';
+    const fallback = async fn => { try { return await fn(); } catch (e) { fbFailed = true; lastErr = e.message || String(e); return []; } };
     for (const t of srcTypes) {
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
@@ -908,22 +906,23 @@
       let oaFailed = false;
       if (Date.now() < oaBusyUntil) oaFailed = true;
       else try {
+        await pause(1200); // space the requests so the service does not throttle the search
         const d = await (await getWithRetry('https://api.openalex.org/works?' + params.toString())).json();
         res = (d.results || []).filter(w => !w.is_retracted && usableTitle(w.title));
         if (t === 'gov') res = res.filter(isTrustedWork);
       } catch (err) {
-        // OpenAlex is busy: OpenAlex is skipped for the next 2 minutes.
-        oaFailed = true; oaBusyUntil = Date.now() + 120000;
+        oaFailed = true; lastErr = 'OpenAlex ' + (err.message || err);
+        // Only busy responses pause OpenAlex for 2 minutes; other errors are shown as they are.
+        if (/busy|HTTP 429|HTTP 503/.test(err.message || '')) oaBusyUntil = Date.now() + 120000;
       }
       if (oaFailed) oaBusy = true;
-      // Free sources: Crossref always runs for articles; when OpenAlex is busy it also stands in for reports (not for trusted government sources).
       if (t === 'articles' || (oaFailed && t === 'reports')) res = res.concat(await fallback(() => crossrefSearch(query, year)));
       if (t === 'other') res = res.concat(await fallback(() => europePmcSearch(query, year)));
       res.slice(0, 12).forEach(w => { if (!seen.has(w.id)) { seen.add(w.id); out.push(w); } });
     }
-    if (!out.length && oaBusy) throw new Error(fbFailed
+    if (!out.length && oaBusy) throw new Error((fbFailed
       ? 'The literature services are busy right now. Wait a minute, then search again.'
-      : 'OpenAlex is busy, and the free sources found nothing for these words. Try different keywords, or search again in a minute.');
+      : 'OpenAlex is busy, and the free sources found nothing for these words. Try different keywords, or search again in a minute.') + (lastErr ? ' Last error: ' + lastErr + '.' : ''));
     return out;
   }
   const mergeRefs = (a = [], b = []) => { const out = [...a]; b.forEach(r => { if (!out.some(q => q.text === r.text)) out.push(r); }); return out; };
