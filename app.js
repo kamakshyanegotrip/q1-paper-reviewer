@@ -1116,7 +1116,11 @@
       if (!list.length) return '';
       const picks = foundPicks[secId] || [];
       const used = new Set(job.usedKeys || []);
-      return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${list.map((w, i) => {
+      // Relevant sources are listed first, then the rest; each keeps its own index, so the saved picks still match.
+      const isRel = i => ((((job.verdicts || {})[secId]) || {})[workKey(list[i])] || {}).relevant === true;
+      const order = list.map((_, i) => i).sort((a, b) => (isRel(b) ? 1 : 0) - (isRel(a) ? 1 : 0) || a - b);
+      return `<div style="margin:8px 0;border-left:3px solid #d8d2c4;padding-left:10px">${order.map(i => {
+        const w = list[i];
         // A source already used by a finished update is shown as used, not as waiting to be included.
         // Works already used in an update are not listed here; they appear in the Updated list.
         if (used.has(w.id || String(w.title || '').toLowerCase())) return '';
