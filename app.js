@@ -19,7 +19,7 @@
     set(k, v) { try { localStorage.setItem('q1:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
     del(k) { try { localStorage.removeItem('q1:' + k); } catch (e) { /* ignore */ } }
   };
-  const settings = () => ({ key: store.get('key', ''), api: store.get('api', '') || CFG.apiBase });
+  const settings = () => ({ key: store.get('key', ''), api: store.get('api', '') || CFG.apiBase, oaKey: store.get('oaKey', '') });
   const history = {
     all() { return store.get('history', []); },
     upsert(entry) {
@@ -902,6 +902,7 @@
     for (const t of srcTypes) {
       const filter = [TR_SRC_FILTERS[t], year ? `from_publication_date:${year}-01-01` : ''].filter(Boolean).join(',');
       const params = new URLSearchParams({ search: query, 'per-page': '15', select: 'id,doi,title,publication_year,authorships,primary_location,type,cited_by_count,abstract_inverted_index,is_retracted', filter });
+      if (settings().oaKey) params.set('api_key', settings().oaKey);
       let res = [];
       let oaFailed = false;
       if (Date.now() < oaBusyUntil) oaFailed = true;
@@ -1914,7 +1915,7 @@
   const dlg = $('#settingsDialog');
   function openSettings(msg) {
     const s = settings();
-    $('#setKey').value = s.key; $('#setApi').value = s.api;
+    $('#setKey').value = s.key; $('#setApi').value = s.api; $('#setOaKey').value = s.oaKey || '';
     $('#settingsStatus').textContent = msg || '';
     if (typeof dlg.showModal === 'function') dlg.showModal(); else dlg.setAttribute('open', '');
   }
@@ -1923,7 +1924,7 @@
   $('#settingsForm').addEventListener('submit', (e) => {
     const key = $('#setKey').value.trim(); const api = $('#setApi').value.trim();
     if (!key) { e.preventDefault(); $('#settingsStatus').textContent = 'Please enter the access key.'; return; }
-    store.set('key', key); store.set('api', api && api !== CFG.apiBase ? api : '');
+    store.set('key', key); store.set('api', api && api !== CFG.apiBase ? api : ''); store.set('oaKey', $('#setOaKey').value.trim());
     toast('Settings saved'); setTimeout(() => { refreshMe(); route(); }, 50);
   });
   $('#testKeyBtn').addEventListener('click', async () => {
