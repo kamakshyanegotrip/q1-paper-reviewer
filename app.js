@@ -791,7 +791,7 @@
       return values.find(t => String(t).includes(y) && plain(t).includes(name)) || null;
     };
     const text = refMap[key] || byAuthorYear(key);
-    if (!text) return '[citation needed]';
+    if (!text) return '';
     if (TR_NUMBERED.includes(style)) { if (!nums.has(key)) nums.set(key, nums.size + 1); return '[' + nums.get(key) + ']'; }
     const m = String(text).match(/^(.*?)\s*\((\d{4}|n\.d\.)[a-z]?\)/);
     const year = m ? m[2] : ((String(text).match(/\d{4}/) || [''])[0]);
@@ -849,6 +849,10 @@
     const keys = (works || []).map(w => String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || String(w.id || '').replace(/^doi:/, '')).map(k => k.toLowerCase()).filter(Boolean);
     return { covered: keys.filter(k => cited.has(k)).length, total: keys.length };
   }
+  // The key a source is cited by in the text: its DOI, or its id.
+  function workCiteKey(w) { return (String(w.doi || '').replace(/^https?:\/\/(dx\.)?doi\.org\//i, '') || String(w.id || '').replace(/^doi:/, '')).toLowerCase(); }
+  // A reference whose first author is a single letter, empty or "Unknown" cannot be cited properly.
+  function badRefName(text) { const s = String(text || '').trim().split(',')[0].replace(/[^A-Za-zÀ-ž]/g, ''); return s.length < 3 || /unknown/i.test(s); }
   function isTrustedWork(w) {
     const names = [(w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || ''];
     (w.authorships || []).forEach(a => (a.institutions || []).forEach(i => names.push(i.display_name || '')));
@@ -1744,8 +1748,8 @@
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
       const UPDATE_BATCH = 30;
       const works = allWorks.slice(0, UPDATE_BATCH);
-      const restWorks = allWorks.slice(UPDATE_BATCH);
-      const restKeys = new Set(restWorks.map(workKey));
+      let restWorks = allWorks.slice(UPDATE_BATCH);
+      let restKeys = new Set(restWorks.map(workKey));
       if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
       if (b.disabled) return;
       b.disabled = true; b.textContent = 'Updating…';
@@ -1759,17 +1763,27 @@
         const after = ((store.get(TR_KEY, {}) || {}).sections || {})[sec.id] || {};
         const words = String(after.text || '').trim().split(/\s+/).filter(Boolean).length;
         const cites = (String(after.text || '').match(/\{\{cite:/g) || []).length;
+        // Only sources the new text actually cites are marked Updated; the others stay ticked for the next run.
+        const citedNow = citeKeysIn(after.text);
+        const usedWorks = works.filter(w => { const k = workCiteKey(w); return !!k && citedNow.has(k); });
+        const unusedWorks = works.filter(w => !usedWorks.includes(w));
+        restWorks = [...unusedWorks, ...restWorks];
+        restKeys = new Set(restWorks.map(workKey));
+        const refKeys = new Set((after.references || []).map(r => String(r.key || '').toLowerCase()));
+        const noRef = [...citedNow].filter(k => !refKeys.has(k)).length;
+        const badAuthors = (after.references || []).filter(r => badRefName(r.text)).length;
+        const checkText = noRef || badAuthors ? ` Check: ${noRef} citation${noRef === 1 ? '' : 's'} have no reference; ${badAuthors} reference${badAuthors === 1 ? ' has' : 's have'} a broken author name.` : '';
         // Batch count for this section: the run number, and how many batches remain.
         const runNo = (((store.get(TR_KEY, {}) || {}).secBatch || {})[sec.id] || { run: 0 }).run + 1;
         const leftBatches = Math.ceil(restWorks.length / UPDATE_BATCH);
         const batchText = restWorks.length
           ? `Batch ${runNo} done (${works.length} sources). ${restWorks.length} sources are still ${fromIncluded ? 'included' : 'ticked'}: ${leftBatches} batch${leftBatches === 1 ? '' : 'es'} left. Click Update for batch ${runNo + 1}.`
           : `Batch ${runNo} done (${works.length} sources). All batches for this section are done.`;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${cov.covered} of ${cov.total} sources are cited in the text. ${batchText}`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words, ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated. ${batchText}${checkText}`;
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const batchState = Object.assign({}, latest.secBatch || {}, { [sec.id]: { run: restWorks.length ? runNo : 0 } });
-        const usedKeys = works.map(w => w.id || String(w.title || '').toLowerCase());
+        const usedKeys = usedWorks.map(w => w.id || String(w.title || '').toLowerCase());
         saveJob({
           secBatch: batchState,
           secNotes: Object.assign({}, latest.secNotes || {}, { [sec.id]: msg }),
@@ -1777,7 +1791,7 @@
           foundPicks: Object.assign({}, latest.foundPicks || {}, { [sec.id]: [] }),
           secIncluded: Object.assign({}, latest.secIncluded || {}, { [sec.id]: [] })
         });
-        markUsed(works, sec.id);
+        markUsed(usedWorks, sec.id);
         // Sources not used in this batch stay ticked (or included) for the next Update.
         const after2 = store.get(TR_KEY, {}) || {};
         if (fromIncluded) saveJob({ secIncluded: Object.assign({}, after2.secIncluded || {}, { [sec.id]: restWorks }) });
