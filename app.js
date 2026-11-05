@@ -1626,6 +1626,8 @@
         if (!why) break;
       }
       cov.added = added;
+      // How many sources the writer received (the write engine counts them after filtering).
+      cov.sources = d && d.sources;
       // Read the saved draft again before saving: the writer call can take a minute, and other sections may have changed meanwhile.
       const latest = store.get(TR_KEY, {}) || {};
       const sectionsNow = Object.assign({}, latest.sections || {});
@@ -1800,7 +1802,7 @@
         const batchText = restWorks.length
           ? `Batch ${runNo} done (${works.length} sources). ${restWorks.length} sources are still ${fromIncluded ? 'included' : 'ticked'}: ${leftBatches} batch${leftBatches === 1 ? '' : 'es'} left. Click Update for batch ${runNo + 1}.`
           : `Batch ${runNo} done (${works.length} sources). All batches for this section are done.`;
-        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words (${cov.added >= 0 ? '+' : ''}${cov.added} in this run), ${cites} citations. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated.${unusedWorks.length ? ` ${unusedWorks.length} not cited: left out of the queue and not marked Updated. They can be ticked again in the search list.` : ''} ${batchText}${checkText}`;
+        const msg = `Updated at ${new Date().toLocaleTimeString()}: ${words} words (${cov.added >= 0 ? '+' : ''}${cov.added} in this run), ${cites} citations. Sources sent to the writer: ${cov.sources === undefined ? 'unknown' : cov.sources} of ${works.length}. ${usedWorks.length} of ${works.length} sources in this batch are cited and marked Updated.${unusedWorks.length ? ` ${unusedWorks.length} not cited: left out of the queue and not marked Updated. They can be ticked again in the search list.` : ''} ${batchText}${checkText}`;
         // Used sources are marked as used and un-ticked, so they no longer look like they are waiting.
         const latest = store.get(TR_KEY, {}) || {};
         const batchState = Object.assign({}, latest.secBatch || {}, { [sec.id]: { run: restWorks.length ? runNo : 0 } });
