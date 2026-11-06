@@ -1643,7 +1643,7 @@
       for (let k = 0; k < works.length; k += SET_SIZE) {
         const chunk = works.slice(k, k + SET_SIZE);
         say(`Writing a paragraph for sources ${k + 1} to ${Math.min(k + SET_SIZE, works.length)} of ${works.length}…`);
-        const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text, instruction: note }));
+        const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text.slice(-3000), instruction: note }));
         if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
         // The writer cites by label (S1, S2 ...). Each label becomes this app's key for that source, so the check below matches.
         const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*S(\d+)\s*\}\}/gi, (m, n) => { const w = chunk[Number(n) - 1]; const k = w ? workCiteKeys(w)[0] : null; return k ? '{{cite:' + k + '}}' : m; });
@@ -1652,10 +1652,11 @@
         if (d1.references) refs = mergeRefs(refs, d1.references);
         // A set whose paragraph does not cite any of its sources is a failed attempt. Stop here, so no more sources are paid for.
         const citesHere = para ? citeKeysIn(para) : new Set();
-        const okHere = para && wordCount(para) >= 15 && chunk.some(w => workCiteKeys(w).some(k => citesHere.has(k)));
+        const citedHere = chunk.filter(w => workCiteKeys(w).some(k => citesHere.has(k))).length;
+        const okHere = para && wordCount(para) >= 15 && citedHere > 0;
         if (okHere) { text = text.trim() + '\n\n' + para; newParas.push(para); }
-        else {
-          missed.push(...chunk);
+        else missed.push(...chunk);
+        if (!okHere || citedHere < chunk.length) {
           stoppedAt = { from: k + 1, to: Math.min(k + SET_SIZE, works.length) };
           break;
         }
@@ -1853,13 +1854,17 @@
       const fromIncluded = ((cur.secIncluded || {})[sec.id] || []).length > 0;
       // A source is skipped only when its citation is already in this section's text, not because an earlier run sent it.
       const citedNow = citeKeysIn(((cur.sections || {})[sec.id] || {}).text || '');
-      const allWorks = (fromIncluded ? cur.secIncluded[sec.id] : found.filter((_, i) => picks.includes(i))).filter(w => !workCiteKeys(w).some(k => citedNow.has(k)) && usableAuthor(w));
+      const candidates = fromIncluded ? (cur.secIncluded[sec.id] || []) : found.filter((_, i) => picks.includes(i));
+      const skippedCited = candidates.filter(w => workCiteKeys(w).some(k => citedNow.has(k))).length;
+      const skippedAuthor = candidates.filter(w => !usableAuthor(w)).length;
+      const allWorks = candidates.filter(w => !workCiteKeys(w).some(k => citedNow.has(k)) && usableAuthor(w));
       // One update uses at most 30 sources, so the writer can cite them. The rest stay ticked for the next Update.
       const UPDATE_BATCH = 1000;
       const works = allWorks.slice(0, UPDATE_BATCH);
       let restWorks = allWorks.slice(UPDATE_BATCH);
       let restKeys = new Set(restWorks.map(workKey));
-      if (!works.length) { noteFor(sec.id, 'Find literature first, then tick the sources to use.'); return; }
+      if (!works.length) { noteFor(sec.id, `Nothing sent to the writer, so no cost was incurred: ${skippedCited} already cited, ${skippedAuthor} with no usable author name. Tick sources that are not yet cited and have an author name.`); return; }
+      noteFor(sec.id, `Sending ${works.length} sources to the writer. Skipped: ${skippedCited} already cited, ${skippedAuthor} with no usable author name.`);
       if (b.disabled) return;
       b.disabled = true; b.textContent = 'Updating…';
       // Source choices are locked while the update runs; the list is redrawn when it finishes.
