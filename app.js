@@ -1610,7 +1610,13 @@
     };
     // Literature update: revise the section, then keep asking for the missing words (as the transform does)
     // until it reaches its planned length. The section is kept as it was if the result is still too short.
+    const reviseBusy = {};
     const reviseSection = async (sec, instruction, works) => {
+      if (reviseBusy[sec.id]) throw new Error('An update for this section is already running. Wait for it to finish.');
+      reviseBusy[sec.id] = true;
+      try { return await reviseSectionRun(sec, instruction, works); } finally { reviseBusy[sec.id] = false; }
+    };
+    const reviseSectionRun = async (sec, instruction, works) => {
       const cur = store.get(TR_KEY, {}) || {};
       const sections = Object.assign({}, cur.sections || {});
       // The saved text is used as it is. Trimming it at other chapters' headings dropped the earlier phases' paragraphs on every run.
@@ -1628,6 +1634,7 @@
       // The section is passed through in turn; a call that adds no text is tried once more.
       let d = null, cov = { covered: 0, total: 0 };
       let text = existing, added = 0, sent = 0, refs = [], missed = [];
+      const newParas = [];
       const cites = (w) => { const keys = workCiteKeys(w); return keys.length ? keys[0] : ''; };
       // One short paragraph per set of up to SET_SIZE sources. The writer returns only that paragraph,
       // and it is added at the end of the section, so the rest of the text cannot be shortened.
@@ -1640,7 +1647,7 @@
         const para = trTrimForeign(String(d1.text || ''), sec.id).replace(/^#+\s.*$/gm, '').trim();
         sent += chunk.length;
         if (d1.references) refs = mergeRefs(refs, d1.references);
-        if (para && wordCount(para) >= 15) text = text.trim() + '\n\n' + para;
+        if (para && wordCount(para) >= 15) { text = text.trim() + '\n\n' + para; newParas.push(para); }
         else missed.push(...chunk);
       }
       if (text.trim() === String(existing).trim() || wordCount(text) <= before) throw new Error('The writer added no new paragraph from the selected sources, so the section was kept as it was.');
@@ -1654,7 +1661,10 @@
       const latest = store.get(TR_KEY, {}) || {};
       const sectionsNow = Object.assign({}, latest.sections || {});
       const prevSection = sectionsNow[sec.id] || null;
-      sectionsNow[sec.id] = { text, references: mergeRefs((prevSection || {}).references, d.references || []) };
+      // Another update may have saved while this one ran; its paragraphs are kept, and these are added after them.
+      const savedNow = (prevSection || {}).text || '';
+      const finalText = newParas.length ? savedNow.trim() + '\n\n' + newParas.join('\n\n') : text;
+      sectionsNow[sec.id] = { text: finalText, references: mergeRefs((prevSection || {}).references, d.references || []) };
       if (!saveJob({ sections: sectionsNow, secPrev: prevSection ? Object.assign({}, latest.secPrev || {}, { [sec.id]: prevSection }) : (latest.secPrev || {}) })) throw new Error(STORAGE_FULL_MSG);
       return cov;
     };
