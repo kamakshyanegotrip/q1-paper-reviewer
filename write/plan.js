@@ -224,7 +224,7 @@
     if (APPROACH_BRIEF[approach]) lines.push('Writing approach: ' + APPROACH_BRIEF[approach]);
     if (instruction && String(existing).trim()) {
       lines.push(`Revise the section below as instructed: ${String(instruction).slice(0, 1000)}`);
-      lines.push('Keep every existing paragraph and citation marker. For each listed source, write at least one NEW paragraph of two to four sentences that states the finding or argument that source reports, and cite that source inside that paragraph as {{cite:KEY}} using its exact key from the Sources list. Insert each new paragraph where it fits the section. Do not reword the existing paragraphs to add citations to them. Use at most two citations per sentence and never cite a source whose author is missing or is a title. Do not invent citations or keys. Output the complete revised section only.');
+      lines.push('Keep every existing paragraph and citation marker. For each listed source, write at least one NEW paragraph of two to four sentences that states the finding or argument that source reports, and cite that source inside that paragraph as {{cite:KEY}} using its exact key from the Sources list. Insert each new paragraph where it fits the section. Do not reword the existing paragraphs to add citations to them. Each sentence cites exactly one source: one {{cite:KEY}} per sentence, never two. Give each source its own sentence. Never cite a source whose author is missing or is a title. Do not invent citations or keys. Output the complete revised section only.');
       if (sourcesText) lines.push(`Sources to add (each needs a new paragraph):\n${sourcesText}`);
       lines.push(`Section to revise (about ${countWords(existing)} words now). Keep its length as the new sources require; there is no word limit for an update.\n${clip(String(existing), 30000)}`);
     } else if (existing && String(existing).trim()) {
@@ -243,8 +243,8 @@
       'You write one new paragraph for an academic document. The app adds it to the section below.',
       'Document: ' + (project.title || '(not given)'),
       'Section: ' + section + '. ' + String(instruction || '').slice(0, 500),
-      'Write ONE paragraph of three to five sentences. It states what the listed sources report together, on the topic of this section, in the same style as the section.',
-      'Cite each listed source in the paragraph as {{cite:S1}}, {{cite:S2}} and so on, using the label of the source from the Sources list. Cite no other source. Use at most two citations per sentence.',
+      'Write ONE paragraph. Write exactly one sentence for each listed source, in the order listed. Each sentence states what that source reports, on the topic of this section, in the same style as the section.',
+      'Each sentence ends with exactly one citation for its own source, written as {{cite:S1}}, {{cite:S2}} and so on, using the label from the Sources list. Each sentence has one citation only, never two. Cite no other source.',
       'Output only that paragraph. Do not output the section, a heading, a list or commentary. Do not invent facts, citations or keys.',
       sourcesText ? 'Sources:\n' + sourcesText : 'Sources: none listed.',
       outline ? 'Headings already in the section (its earlier content is covered under these):\n' + clip(String(outline), 2000) : '',
