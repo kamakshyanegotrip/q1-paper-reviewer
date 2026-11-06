@@ -14,11 +14,68 @@
   const app = document.getElementById('app');
 
   // ---------- storage (browser-only, fail-safe) ----------
+  // The search-result cache (job.found) can be several MB, which fills the small localStorage quota.
+  // It is kept in IndexedDB instead; the rest of the draft stays in localStorage. If IndexedDB is not
+  // available, the draft is stored exactly as before.
+  const DRAFT_KEY = 'tr:draft';
+  let foundCache = null;     // search results, loaded from IndexedDB before the page starts
+  let foundInIdb = false;    // true once IndexedDB has been opened and loaded
+  const idbRun = (mode, fn) => new Promise((resolve, reject) => {
+    const open = indexedDB.open('q1-cache', 1);
+    open.onupgradeneeded = () => open.result.createObjectStore('kv');
+    open.onerror = () => reject(open.error);
+    open.onsuccess = () => {
+      const db = open.result;
+      const tx = db.transaction('kv', mode);
+      const req = fn(tx.objectStore('kv'));
+      tx.oncomplete = () => { db.close(); resolve(req ? req.result : undefined); };
+      tx.onerror = tx.onabort = () => { db.close(); reject(tx.error || new Error('indexeddb')); };
+    };
+  });
   const store = {
-    get(k, d) { try { const v = localStorage.getItem('q1:' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
-    set(k, v) { try { localStorage.setItem('q1:' + k, JSON.stringify(v)); return true; } catch (e) { return false; } },
+    get(k, d) {
+      try {
+        const v = localStorage.getItem('q1:' + k);
+        const out = v === null ? d : JSON.parse(v);
+        if (k === DRAFT_KEY && foundInIdb && out && typeof out === 'object') return Object.assign({}, out, { found: foundCache || {} });
+        return out;
+      } catch (e) { return d; }
+    },
+    set(k, v) {
+      try {
+        if (k === DRAFT_KEY && foundInIdb && v && typeof v === 'object') {
+          const { found, ...rest } = v;
+          if (found !== undefined) {
+            foundCache = found;
+            idbRun('readwrite', s => s.put(found, 'found')).catch(() => { const el = document.getElementById('trStatus'); if (el) el.textContent = 'Search results could not be saved in this browser. Reload the page before continuing.'; });
+          }
+          localStorage.setItem('q1:' + k, JSON.stringify(rest));
+          return true;
+        }
+        localStorage.setItem('q1:' + k, JSON.stringify(v));
+        return true;
+      } catch (e) { return false; }
+    },
     del(k) { try { localStorage.removeItem('q1:' + k); } catch (e) { /* ignore */ } }
   };
+  // Loads the search results before the page starts. Results saved in the draft by older versions are moved over.
+  async function loadFoundCache() {
+    let legacy = null;
+    try { const raw = localStorage.getItem('q1:' + DRAFT_KEY); const d = raw ? JSON.parse(raw) : null; legacy = d && d.found ? d.found : null; } catch (e) { legacy = null; }
+    try {
+      const stored = await idbRun('readonly', s => s.get('found'));
+      foundCache = legacy || stored || {};
+      foundInIdb = true;
+      if (legacy) {
+        await idbRun('readwrite', s => s.put(legacy, 'found'));
+        const raw = localStorage.getItem('q1:' + DRAFT_KEY);
+        if (raw) { const d = JSON.parse(raw); delete d.found; localStorage.setItem('q1:' + DRAFT_KEY, JSON.stringify(d)); }
+      }
+    } catch (e) {
+      foundInIdb = false;
+      foundCache = null;
+    }
+  }
   const settings = () => ({ key: store.get('key', ''), api: store.get('api', '') || CFG.apiBase, oaKey: store.get('oaKey', '') });
   const history = {
     all() { return store.get('history', []); },
@@ -3268,7 +3325,9 @@
       </div>`;
   }
 
-  setMe(store.get('me', null));
-  refreshMe();
-  route();
+  loadFoundCache().then(() => {
+    setMe(store.get('me', null));
+    refreshMe();
+    route();
+  });
 })();
