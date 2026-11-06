@@ -1142,7 +1142,10 @@
     const listAllW = ws => ws.length
       ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
       : '<div class="muted" style="font-size:13px">None yet.</div>';
-    const updatedAllW = (() => { const seen = new Set(); return Object.values(job.secUsedWorks || {}).flat().filter(w => { const k = w.id || String(w.title || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; }); })();
+    // Updated only for sources cited in some section's current text; earlier runs whose text is gone are not Updated.
+    const citedAnywhere = new Set();
+    Object.values(job.sections || {}).forEach(sec => citeKeysIn(String((sec || {}).text || '')).forEach(k => citedAnywhere.add(k)));
+    const updatedAllW = (() => { const seen = new Set(); return Object.values(job.secUsedWorks || {}).flat().filter(w => { const k = w.id || String(w.title || '').toLowerCase(); if (seen.has(k)) return false; seen.add(k); return workCiteKeys(w).some(k2 => citedAnywhere.has(k2)); }); })();
     // One combined list: works to be updated, then works already used, each tagged.
     const combinedList = (inc, usedW) => {
       const rows = [...inc.map(w => ({ w, tag: "Included" })), ...usedW.map(w => ({ w, tag: "Updated" }))];
