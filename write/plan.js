@@ -244,7 +244,7 @@
       'Document: ' + (project.title || '(not given)'),
       'Section: ' + section + '. ' + String(instruction || '').slice(0, 500),
       'Write ONE paragraph of three to five sentences. It states what the listed sources report together, on the topic of this section, in the same style as the section.',
-      'Cite each listed source in the paragraph as {{cite:KEY}} using its exact key from the Sources list. Cite no other source. Use at most two citations per sentence.',
+      'Cite each listed source in the paragraph as {{cite:S1}}, {{cite:S2}} and so on, using the label of the source from the Sources list. Cite no other source. Use at most two citations per sentence.',
       'Output only that paragraph. Do not output the section, a heading, a list or commentary. Do not invent facts, citations or keys.',
       sourcesText ? 'Sources:\n' + sourcesText : 'Sources: none listed.',
       'Section for context only (do not repeat it):\n' + clip(String(existing), 20000)

@@ -224,9 +224,15 @@ const filt = F.filterSources(records, { types: ['article', 'review', 'conference
 const kept = filt.kept || [];
 const style = FMT.resolveStyle(b.style || '');
 const sourcesText = kept.length ? SYN.sourceList(kept) : '';
+// Set paragraphs use short labels (S1, S2 ...) in the prompt, in the order the app sent the sources; the app maps them back to its own keys.
+const setSourcesText = setPara ? works.slice(0, 10).map((w, i) => {
+  let r = null; try { r = OA.normalizeWork(w); } catch (e) { r = null; }
+  const who = r && r.authors && r.authors[0] ? r.authors[0].family : 'Unknown author';
+  return 'S' + (i + 1) + ': ' + who + ' (' + ((r && r.year) || 'n.d.') + '). ' + ((r && r.title) || w.title || '');
+}).join('\n') : '';
 const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
 const prompt = setPara
-  ? P.buildSetParagraphPrompt({ section, sourcesText, existing: String(b.existing || ''), instruction: String(b.instruction || ''), project })
+  ? P.buildSetParagraphPrompt({ section, sourcesText: setSourcesText, existing: String(b.existing || ''), instruction: String(b.instruction || ''), project })
   : transform
   ? P.buildTransformPrompt({ type, section, words, source: String(b.source || ''), prior, sourcesText, project, existing: String(b.existing || '').slice(0, 60000), instruction: String(b.instruction || '').slice(0, 1000), approach: String(b.approach || '').slice(0, 40), style: String(b.style || '').slice(0, 20) })
   : para
