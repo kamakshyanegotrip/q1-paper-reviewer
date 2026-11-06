@@ -1749,6 +1749,9 @@
         // Cleared sources are fresh again: they leave the used and seen lists, so a new search can find them.
         usedKeys: (cur.usedKeys || []).filter(k => !clearedKeys.has(k)),
         seenKeys: (cur.seenKeys || []).filter(k => !clearedKeys.has(k)),
+        // The update takes used works out of the found list. Clear puts the cleared sources back there, as options.
+        found: Object.assign({}, cur.found || {}, { [id]: (() => { const have = ((cur.found || {})[id]) || []; const seen = new Set(have.map(workKey)); return have.concat(works.filter(w => !seen.has(workKey(w)))); })() }),
+        foundPicks: Object.assign({}, cur.foundPicks || {}, { [id]: [] }),
         // The shared Included list also holds these sources; a new search skips anything in it, so they leave it too.
         included: (cur.included || []).filter(w => !clearedKeys.has(workKey(w)))
       };
