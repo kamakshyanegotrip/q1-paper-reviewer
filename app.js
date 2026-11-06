@@ -853,6 +853,8 @@
   // One key form for comparing citation keys: lower case, without the DOI web prefix.
   function nkey(k) { return String(k || '').trim().toLowerCase().replace(/^https?:\/\/(dx\.)?doi\.org\//, '').replace(/^doi:/, ''); }
   // The keys a source can be cited by: its DOI, its id, or its title key (the form used when there is no DOI).
+  // The key the server uses for a source's reference: its DOI, or 'ty:' plus the title when there is no DOI.
+  function sourceKeyFor(w) { return w && w.doi ? nkey(w.doi) : nkey('ty:' + String(w && w.title || '').slice(0, 60)); }
   function workCiteKeys(w) { return [w.doi, w.id, 'ty:' + String(w.title || '').slice(0, 60)].map(nkey).filter(k => k && k !== 'ty:'); }
   // A reference whose first author is a single letter, empty or "Unknown" cannot be cited properly.
   function badRefName(text) { const s = String(text || '').trim().split(',')[0].replace(/[^A-Za-zÀ-ž]/g, ''); return s.length < 3 || /unknown/i.test(s); }
@@ -1658,7 +1660,7 @@
         const brokenCite = /\{\{\s*cite:[^}]*[\n\r…]/i.test(String(d1.text || ''));
         const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*([^}]+)\}\}/gi, (m, list) => {
           // The writer may cite several labels in one tag, e.g. {{cite:S1, S2}}; map each label to its source and emit one tag per source.
-          const keys = String(list).split(',').map(x => x.trim()).map(x => { const mm = x.match(/^S(\d+)$/i); const w = mm ? chunk[Number(mm[1]) - 1] : null; return w ? workCiteKeys(w)[0] : null; });
+          const keys = String(list).split(',').map(x => x.trim()).map(x => { const mm = x.match(/^S(\d+)$/i); const w = mm ? chunk[Number(mm[1]) - 1] : null; return w ? sourceKeyFor(w) : null; });
           if (keys.some(k => !k)) return m;
           return keys.map(k => '{{cite:' + k + '}}').join(' ');
         });
