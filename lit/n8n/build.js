@@ -229,7 +229,7 @@ const setSourcesText = setPara ? works.slice(0, 10).map((w, i) => {
   let r = null; try { r = OA.normalizeWork(w); } catch (e) { r = null; }
   const who = r && r.authors && r.authors[0] ? r.authors[0].family : 'Unknown author';
   return 'S' + (i + 1) + ': ' + who + ' (' + ((r && r.year) || 'n.d.') + '). ' + ((r && r.title) || w.title || '');
-}).join('\n') : '';
+}).join('\\n') : '';
 const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
 const prompt = setPara
   ? P.buildSetParagraphPrompt({ section, sourcesText: setSourcesText, existing: String(b.existing || ''), outline: String(b.outline || ''), instruction: String(b.instruction || ''), project })
