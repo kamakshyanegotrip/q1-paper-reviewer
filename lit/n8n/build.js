@@ -232,7 +232,7 @@ const setSourcesText = setPara ? works.slice(0, 10).map((w, i) => {
 }).join('\n') : '';
 const priorParas = para ? String(b.priorParagraphs || '').split('\\n\\n').map(x => x.trim()).filter(Boolean).slice(-6) : [];
 const prompt = setPara
-  ? P.buildSetParagraphPrompt({ section, sourcesText: setSourcesText, existing: String(b.existing || ''), instruction: String(b.instruction || ''), project })
+  ? P.buildSetParagraphPrompt({ section, sourcesText: setSourcesText, existing: String(b.existing || ''), outline: String(b.outline || ''), instruction: String(b.instruction || ''), project })
   : transform
   ? P.buildTransformPrompt({ type, section, words, source: String(b.source || ''), prior, sourcesText, project, existing: String(b.existing || '').slice(0, 60000), instruction: String(b.instruction || '').slice(0, 1000), approach: String(b.approach || '').slice(0, 40), style: String(b.style || '').slice(0, 20) })
   : para

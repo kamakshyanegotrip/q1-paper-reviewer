@@ -1643,7 +1643,7 @@
       for (let k = 0; k < works.length; k += SET_SIZE) {
         const chunk = works.slice(k, k + SET_SIZE);
         say(`Writing a paragraph for sources ${k + 1} to ${Math.min(k + SET_SIZE, works.length)} of ${works.length}…`);
-        const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text.slice(-3000), instruction: note }));
+        const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text.slice(-3000), outline: text.split('\n').filter(l => /^#{1,6}\s/.test(l.trim())).map(l => l.trim()).join('\n').slice(0, 2000), instruction: note }));
         if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
         // The writer cites by label (S1, S2 ...). Each label becomes this app's key for that source, so the check below matches.
         const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*S(\d+)\s*\}\}/gi, (m, n) => { const w = chunk[Number(n) - 1]; const k = w ? workCiteKeys(w)[0] : null; return k ? '{{cite:' + k + '}}' : m; });
