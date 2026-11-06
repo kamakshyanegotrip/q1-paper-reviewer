@@ -59,7 +59,7 @@ function formatReference(src, style) {
   const isGrey = !!src.isGrey;
 
   if (st === 'apa7') {
-    const who = isGrey && src.organisation ? src.organisation : joinApa(authors.map(apaName));
+    const who = isGrey && src.organisation && !authors.length ? src.organisation : joinApa(authors.map(apaName));
     if (isGrey) {
       return `${who} (${year}). ${title}${src.reportType ? ' (' + src.reportType + ')' : ''}. ${src.publisher && src.publisher !== who ? src.publisher + '. ' : ''}${doi}`.trim();
     }
@@ -70,7 +70,7 @@ function formatReference(src, style) {
   }
 
   if (st === 'harvard') {
-    const who = isGrey && src.organisation ? src.organisation : joinHarvard(authors.map(harvardName));
+    const who = isGrey && src.organisation && !authors.length ? src.organisation : joinHarvard(authors.map(harvardName));
     if (isGrey) return `${who} (${year}) ${title}. ${src.publisher ? src.publisher + '.' : ''} ${doi ? 'Available at: ' + doi : ''}`.replace(/\s+/g, ' ').trim();
     const vol = src.volume ? ` ${src.volume}` : '';
     const iss = src.issue ? `(${src.issue})` : '';
@@ -79,7 +79,7 @@ function formatReference(src, style) {
   }
 
   if (st === 'chicago') {
-    const who = isGrey && src.organisation ? src.organisation : joinChicago(authors.map(chicagoName));
+    const who = isGrey && src.organisation && !authors.length ? src.organisation : joinChicago(authors.map(chicagoName));
     if (isGrey) return `${who}. ${year}. ${title}.${src.reportType ? ' ' + src.reportType + '.' : ''} ${src.publisher ? src.publisher + '. ' : ''}${doi}`.replace(/\s+/g, ' ').trim();
     const vol = src.volume ? ` ${src.volume}` : '';
     const iss = src.issue ? `, no. ${src.issue}` : '';
@@ -88,7 +88,7 @@ function formatReference(src, style) {
   }
 
   if (st === 'ieee') {
-    const who = isGrey && src.organisation ? src.organisation : joinIeee(authors.map(ieeeName));
+    const who = isGrey && src.organisation && !authors.length ? src.organisation : joinIeee(authors.map(ieeeName));
     if (isGrey) return `${who}, "${title}," ${src.publisher ? src.publisher + ', ' : ''}${year}.${doi ? ' [Online]. Available: ' + doi : ''}`.replace(/\s+/g, ' ').trim();
     const vol = src.volume ? `, vol. ${src.volume}` : '';
     const iss = src.issue ? `, no. ${src.issue}` : '';
@@ -97,7 +97,7 @@ function formatReference(src, style) {
   }
 
   if (st === 'mla') {
-    const who = isGrey && src.organisation ? src.organisation : joinMla(authors.map(mlaName));
+    const who = isGrey && src.organisation && !authors.length ? src.organisation : joinMla(authors.map(mlaName));
     if (isGrey) return `${who}. ${title}. ${src.publisher ? src.publisher + ', ' : ''}${year}.${doi ? ' ' + doi + '.' : ''}`.replace(/\s+/g, ' ').replace(/\.\./g, '.').trim();
     const vol = src.volume ? `, vol. ${src.volume}` : '';
     const iss = src.issue ? `, no. ${src.issue}` : '';
@@ -106,7 +106,7 @@ function formatReference(src, style) {
   }
 
   // vancouver
-  const who = isGrey && src.organisation ? src.organisation : authors.map(vancouverName).join(', ');
+  const who = isGrey && src.organisation && !authors.length ? src.organisation : authors.map(vancouverName).join(', ');
   if (isGrey) return `${who}. ${title}. ${src.publisher ? src.publisher + '; ' : ''}${year}.${doi ? ' Available from: ' + doi : ''}`.replace(/\s+/g, ' ').trim();
   const vol = src.volume ? ` ${src.volume}` : '';
   const iss = src.issue ? `(${src.issue})` : '';
