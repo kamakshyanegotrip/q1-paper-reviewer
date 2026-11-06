@@ -1234,7 +1234,10 @@
     const litPanel = s => {
       const hasList = ((job.found || {})[s.id] || []).length > 0;
       const inc = (job.secIncluded || {})[s.id] || [];
-      const usedW = (job.secUsedWorks || {})[s.id] || [];
+      // Updated means the source is cited in the section's text now. Sources from earlier runs whose text is gone are not shown as Updated.
+      const secText = String(((job.sections || {})[s.id] || {}).text || '');
+      const citedInText = citeKeysIn(secText);
+      const usedW = ((job.secUsedWorks || {})[s.id] || []).filter(w => workCiteKeys(w).some(k => citedInText.has(k)));
       const listOf = ws => ws.length
         ? ws.map((w, i) => `<div style="font-size:14px;margin:3px 0">${i + 1}. ${esc(workLine(w))}</div>`).join('')
         : '<div class="muted" style="font-size:13px">None yet.</div>';
