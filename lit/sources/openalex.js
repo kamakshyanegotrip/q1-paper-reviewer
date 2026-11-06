@@ -2,6 +2,7 @@
 // The HTTP call is injected (fetchJson) so tests can run without network access.
 'use strict';
 const { trustedPublisher } = require('./grey');
+const { splitAuthor } = require('../names');
 
 const BASE = 'https://api.openalex.org/works';
 
@@ -26,11 +27,7 @@ function normalizeWork(w) {
     doi,
     title: w.title || '',
     year: w.publication_year || null,
-    authors: (w.authorships || []).map(a => {
-      const name = (a.author && a.author.display_name) || '';
-      const parts = name.split(' ');
-      return { family: parts.slice(-1)[0] || '', given: parts.slice(0, -1).join(' ') };
-    }),
+    authors: (w.authorships || []).map(a => splitAuthor((a.author && a.author.display_name) || '')).filter(a => a && a.family),
     venue: src.display_name || '',
     type: w.type === 'report' ? 'grey' : (w.type === 'review' ? 'review' : (w.type === 'proceedings-article' ? 'conference' : 'article')),
     citations: w.cited_by_count || 0,

@@ -6,7 +6,7 @@ const fs = require('fs');
 const path = require('path');
 
 const ROOT = path.join(__dirname, '..', '..');
-const MODULES = ['lit/format', 'lit/filter', 'lit/validate', 'lit/synthesis', 'lit/pipeline',
+const MODULES = ['lit/format', 'lit/names', 'lit/filter', 'lit/validate', 'lit/synthesis', 'lit/pipeline',
   'lit/sources/grey', 'lit/sources/openalex', 'lit/sources/crossref', 'lit/sources/unpaywall', 'lit/sources/europepmc', 'lit/sources/core', 'lit/sources/doaj',
   'write/formats', 'write/templates', 'write/plan'];
 
