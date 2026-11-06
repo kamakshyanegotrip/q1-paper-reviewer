@@ -1268,7 +1268,7 @@
       const lastNote = (job.secNotes || {})[s.id] || '';
       const statusTag = !text ? '<span style="background:#eee;color:#555;border-radius:10px;padding:2px 8px;font-size:12px">Not transformed</span>'
         : /^Not updated/.test(lastNote) ? '<span style="background:#fbe3dc;color:#8a2b12;border-radius:10px;padding:2px 8px;font-size:12px">Last update not applied</span>'
-        : /^Updated/.test(lastNote) ? '<span style="background:#dcefe0;color:#1f5a2c;border-radius:10px;padding:2px 8px;font-size:12px">Updated</span>'
+        : /^Updated/.test(lastNote) && citeKeysIn(String(text)).size > 0 ? '<span style="background:#dcefe0;color:#1f5a2c;border-radius:10px;padding:2px 8px;font-size:12px">Updated</span>'
         : '<span style="background:#eef0f7;color:#33405f;border-radius:10px;padding:2px 8px;font-size:12px">Transformed</span>';
       return `<article data-sec-panel="${esc(s.id)}" style="margin-bottom:18px;border:1px solid #cfc8b6;border-left:6px solid #7a6a3f;border-radius:8px;background:#fffdf7;padding:10px 14px">
         <div style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;border-bottom:1px solid #e3ddcc;padding-bottom:8px;margin-bottom:8px">
