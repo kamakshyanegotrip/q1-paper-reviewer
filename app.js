@@ -1645,7 +1645,9 @@
         say(`Writing a paragraph for sources ${k + 1} to ${Math.min(k + SET_SIZE, works.length)} of ${works.length}…`);
         const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text, instruction: note }));
         if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
-        const para = trTrimForeign(String(d1.text || ''), sec.id).replace(/^#+\s.*$/gm, '').trim();
+        // The writer cites by label (S1, S2 ...). Each label becomes this app's key for that source, so the check below matches.
+        const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*S(\d+)\s*\}\}/gi, (m, n) => { const w = chunk[Number(n) - 1]; const k = w ? workCiteKeys(w)[0] : null; return k ? '{{cite:' + k + '}}' : m; });
+        const para = trTrimForeign(labelled, sec.id).replace(/^#+\s.*$/gm, '').trim();
         sent += chunk.length;
         if (d1.references) refs = mergeRefs(refs, d1.references);
         // A set whose paragraph does not cite any of its sources is a failed attempt. Stop here, so no more sources are paid for.
