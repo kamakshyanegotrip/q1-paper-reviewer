@@ -1376,7 +1376,9 @@
       const prevW = ((latest.secUsedWorks || {})[secId]) || [];
       const seenU = new Set(prevW.map(workKey));
       const addW = works.filter(w => !seenU.has(workKey(w)));
+      const written = new Set([...(((latest.secWritten || {})[secId]) || []), ...works.flatMap(workCiteKeys)]);
       saveJob({
+        secWritten: Object.assign({}, latest.secWritten || {}, { [secId]: [...written] }),
         usedKeys: [...new Set([...(latest.usedKeys || []), ...keys])],
         works: (latest.works || []).filter(w => !keys.has(workKey(w))),
         found: Object.assign({}, latest.found || {}, { [secId]: ((latest.found || {})[secId] || []).filter(w => !keys.has(workKey(w))) }),
@@ -1761,7 +1763,7 @@
       const cur = store.get(TR_KEY, {}) || {};
       const works = [...((cur.secUsedWorks || {})[id] || []), ...((cur.secIncluded || {})[id] || [])];
       // Sources cleared earlier (kept in secCleared) are still offered for removal, so the text can be tied to them later.
-      const earlier = ((cur.secCleared || {})[id]) || [];
+      const earlier = [...(((cur.secCleared || {})[id]) || []), ...((((cur.secWritten || {})[id]) || []))];
       const removed = new Set([...works.flatMap(workCiteKeys), ...earlier]);
       const clearedKeys = new Set([...removed, ...works.map(workKey), ...earlier]);
       const pick = obj => Object.assign({}, obj || {}, { [id]: [] });
