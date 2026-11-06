@@ -238,7 +238,7 @@
   }
 
   // One short paragraph that states what a set of sources report together, for the section. The app adds it to the section.
-  function buildSetParagraphPrompt({ section, sourcesText = '', existing = '', instruction = '', project = {} }) {
+  function buildSetParagraphPrompt({ section, sourcesText = '', existing = '', outline = '', instruction = '', project = {} }) {
     const lines = [
       'You write one new paragraph for an academic document. The app adds it to the section below.',
       'Document: ' + (project.title || '(not given)'),
@@ -247,6 +247,7 @@
       'Cite each listed source in the paragraph as {{cite:S1}}, {{cite:S2}} and so on, using the label of the source from the Sources list. Cite no other source. Use at most two citations per sentence.',
       'Output only that paragraph. Do not output the section, a heading, a list or commentary. Do not invent facts, citations or keys.',
       sourcesText ? 'Sources:\n' + sourcesText : 'Sources: none listed.',
+      outline ? 'Headings already in the section (its earlier content is covered under these):\n' + clip(String(outline), 2000) : '',
       'Section for context only (do not repeat it):\n' + clip(String(existing), 20000)
     ];
     return lines.join('\n');
