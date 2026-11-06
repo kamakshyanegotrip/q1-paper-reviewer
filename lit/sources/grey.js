@@ -35,6 +35,8 @@ function buildSearchUrl(query, opts = {}) {
   return 'https://api.openalex.org/works?' + params.toString();
 }
 
+const { splitAuthor } = require('../names');
+
 function normalizeWork(w) {
   const publisher = (w.primary_location && w.primary_location.source && w.primary_location.source.host_organization_name) ||
     (w.primary_location && w.primary_location.source && w.primary_location.source.display_name) || '';
@@ -49,7 +51,7 @@ function normalizeWork(w) {
     publisher,
     doi: w.doi ? w.doi.replace(/^https?:\/\/doi\.org\//, '') : null,
     url: (w.primary_location && w.primary_location.landing_page_url) || w.doi || '',
-    authors: (w.authorships || []).map(a => { const name = (a.author && a.author.display_name) || ''; const parts = name.split(' '); return { family: parts.slice(-1)[0] || '', given: parts.slice(0, -1).join(' ') }; }).filter(a => a.family),
+    authors: (w.authorships || []).map(a => splitAuthor((a.author && a.author.display_name) || '')).filter(a => a && a.family),
     citations: w.cited_by_count || 0,
     retracted: !!w.is_retracted,
     abstract: '',
