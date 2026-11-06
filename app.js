@@ -1654,6 +1654,8 @@
         const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text.slice(-3000), outline: text.split('\n').filter(l => /^#{1,6}\s/.test(l.trim())).map(l => l.trim()).join('\n').slice(0, 2000), instruction: note }));
         if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
         // The writer cites by label (S1, S2 ...). Each label becomes this app's key for that source, so the check below matches.
+        // A citation cut off by the writer (a line break or an ellipsis inside the tag) is a failed draft: mark it, so the paragraph is not kept.
+        const brokenCite = /\{\{\s*cite:[^}]*[\n\r…]/i.test(String(d1.text || ''));
         const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*([^}]+)\}\}/gi, (m, list) => {
           // The writer may cite several labels in one tag, e.g. {{cite:S1, S2}}; map each label to its source and emit one tag per source.
           const keys = String(list).split(',').map(x => x.trim()).map(x => { const mm = x.match(/^S(\d+)$/i); const w = mm ? chunk[Number(mm[1]) - 1] : null; return w ? workCiteKeys(w)[0] : null; });
@@ -1666,7 +1668,7 @@
         // A set whose paragraph does not cite any of its sources is a failed attempt. Stop here, so no more sources are paid for.
         const citesHere = para ? citeKeysIn(para) : new Set();
         const citedHere = chunk.filter(w => workCiteKeys(w).some(k => citesHere.has(k))).length;
-        const okHere = para && wordCount(para) >= 15 && citedHere > 0;
+        const okHere = para && !brokenCite && wordCount(para) >= 15 && citedHere > 0;
         if (okHere) { text = text.trim() + '\n\n' + para; newParas.push(para); }
         else missed.push(...chunk);
         if (!okHere || citedHere < chunk.length) {
