@@ -1654,7 +1654,12 @@
         const d1 = await apiPostForm(WRITE_PATH, Object.assign({}, base, { action: 'addset', works: JSON.stringify(chunk), existing: text.slice(-3000), outline: text.split('\n').filter(l => /^#{1,6}\s/.test(l.trim())).map(l => l.trim()).join('\n').slice(0, 2000), instruction: note }));
         if (!d1.ok) throw new Error(d1.reason || 'The section could not be revised.');
         // The writer cites by label (S1, S2 ...). Each label becomes this app's key for that source, so the check below matches.
-        const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*S(\d+)\s*\}\}/gi, (m, n) => { const w = chunk[Number(n) - 1]; const k = w ? workCiteKeys(w)[0] : null; return k ? '{{cite:' + k + '}}' : m; });
+        const labelled = String(d1.text || '').replace(/\{\{\s*cite:\s*([^}]+)\}\}/gi, (m, list) => {
+          // The writer may cite several labels in one tag, e.g. {{cite:S1, S2}}; map each label to its source and emit one tag per source.
+          const keys = String(list).split(',').map(x => x.trim()).map(x => { const mm = x.match(/^S(\d+)$/i); const w = mm ? chunk[Number(mm[1]) - 1] : null; return w ? workCiteKeys(w)[0] : null; });
+          if (keys.some(k => !k)) return m;
+          return keys.map(k => '{{cite:' + k + '}}').join(' ');
+        });
         const para = trTrimForeign(labelled, sec.id).replace(/^#+\s.*$/gm, '').trim();
         sent += chunk.length;
         if (d1.references) refs = mergeRefs(refs, d1.references);
