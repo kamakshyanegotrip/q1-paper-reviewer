@@ -1635,6 +1635,7 @@
       let d = null, cov = { covered: 0, total: 0 };
       let text = existing, added = 0, sent = 0, refs = [], missed = [];
       const newParas = [];
+      let stoppedAt = null;
       const cites = (w) => { const keys = workCiteKeys(w); return keys.length ? keys[0] : ''; };
       // One short paragraph per set of up to SET_SIZE sources. The writer returns only that paragraph,
       // and it is added at the end of the section, so the rest of the text cannot be shortened.
@@ -1647,9 +1648,17 @@
         const para = trTrimForeign(String(d1.text || ''), sec.id).replace(/^#+\s.*$/gm, '').trim();
         sent += chunk.length;
         if (d1.references) refs = mergeRefs(refs, d1.references);
-        if (para && wordCount(para) >= 15) { text = text.trim() + '\n\n' + para; newParas.push(para); }
-        else missed.push(...chunk);
+        // A set whose paragraph does not cite any of its sources is a failed attempt. Stop here, so no more sources are paid for.
+        const citesHere = para ? citeKeysIn(para) : new Set();
+        const okHere = para && wordCount(para) >= 15 && chunk.some(w => workCiteKeys(w).some(k => citesHere.has(k)));
+        if (okHere) { text = text.trim() + '\n\n' + para; newParas.push(para); }
+        else {
+          missed.push(...chunk);
+          stoppedAt = { from: k + 1, to: Math.min(k + SET_SIZE, works.length) };
+          break;
+        }
       }
+      if (stoppedAt && !newParas.length) throw new Error(`The writer did not cite sources ${stoppedAt.from} to ${stoppedAt.to}, so the update stopped there and no more sources were sent. The section was kept as it was.`);
       if (text.trim() === String(existing).trim() || wordCount(text) <= before) throw new Error('The writer added no new paragraph from the selected sources, so the section was kept as it was.');
       added = wordCount(text) - before;
       cov = citedCoverage(text, works);
