@@ -227,11 +227,16 @@
       lines.push('Keep every existing paragraph and citation marker. For each listed source, write at least one NEW paragraph of two to four sentences that states the finding or argument that source reports, and cite that source inside that paragraph as {{cite:KEY}} using its exact key from the Sources list. Insert each new paragraph where it fits the section. Do not reword the existing paragraphs to add citations to them. Each sentence cites exactly one source: one {{cite:KEY}} per sentence, never two. Give each source its own sentence. Never cite a source whose author is missing or is a title. Do not invent citations or keys. Output the complete revised section only.');
       if (sourcesText) lines.push(`Sources to add (each needs a new paragraph):\n${sourcesText}`);
       lines.push(`Section to revise (about ${countWords(existing)} words now). Keep its length as the new sources require; there is no word limit for an update.\n${clip(String(existing), 30000)}`);
+    } else if (existing && String(existing).trim() && countWords(existing) > words * 1.1) {
+      // Too long: shorten the section itself. Its text is replaced, not extended.
+      lines.push(`The section below is about ${countWords(existing)} words, but it must be about ${words} words. Shorten it to about ${words} words. Keep its main claims, findings, figures and tables, and keep every {{cite:KEY}} marker and in-text citation that supports a claim you keep. Remove repetition, detail and any sentence that adds no new claim. Keep the section title and the paragraph structure. Output only the shortened section.`);
+      lines.push(`Section to shorten:\n${clip(String(existing), 60000)}`);
     } else if (existing && String(existing).trim()) {
       lines.push(`The section below is already written but is about ${countWords(existing)} words short of the target. Continue it: write about ${words} more words that extend the section with material from the source that is not yet covered. Do not repeat what is written, do not restart the title, and do not write a conclusion for the whole document. Output only the new text.`);
       lines.push(`Section written so far:\n${clip(String(existing), 30000)}`);
     }
-    if (!(instruction && String(existing).trim())) lines.push(`Source article:\n${String(source || '').slice(0, 200000)}`);
+    const shortening = !instruction && String(existing).trim() && countWords(existing) > words * 1.1;
+    if (!(instruction && String(existing).trim()) && !shortening) lines.push(`Source article:\n${String(source || '').slice(0, 600000)}`);
     if (prior.length) lines.push('Sections already transformed (keep consistent with them):\n' + prior.map(p => `## ${p.title}\n${clip(p.text, 2500)}`).join('\n\n'));
     if (sourcesText && !(instruction && String(existing).trim())) lines.push(`Sources:\n${sourcesText}`);
     return lines.filter(x => x !== '').join('\n');
