@@ -1570,9 +1570,12 @@
         setStatus(`Transforming “${s.title}”… this can take up to a minute.`);
         try {
           // One section can need several calls: the model often stops short, so keep asking for the missing words.
-          const planned = outlineNow.sections.find(x => x.id === s.id).words;
+          // Aim at this section's plan, scaled so the whole article still lands on the target.
           const wordCount = x => String(x || '').trim().split(/\s+/).filter(Boolean).length;
-          let text = '', refs = [];
+          const plans = sectionsList.map(x => outlineNow.sections.find(y => y.id === x.id).words);
+          const si = sectionsList.indexOf(s);
+          const doneWords = sectionsList.slice(0, si).reduce((a, x) => a + (out[x.id] ? wordCount(out[x.id].text) : 0), 0);
+          const planned = PL2.aimFor(plans, si, doneWords, target);
           // Each section uses its own sources: the works picked for it, or a search of its own topic.
           let secWorks = [];
           const secFound = (cur.found || {})[s.id] || [];
@@ -1584,25 +1587,15 @@
             try { setStatus(`Finding literature for “${s.title}”…`); secWorks = (await findFor(s)).slice(0, 6); }
             catch (e) { secWorks = []; }
           }
-          for (let attempt = 0; attempt < 6; attempt++) {
-            const have = wordCount(text);
-            // Done when the section is within 10% of its planned length.
-            if (attempt > 0 && have >= planned * 0.9 && have <= planned * 1.1) break;
-            // Too long: shorten the section and replace it. Too short: continue it. A section over 55,000 characters is not sent for shortening (it would be cut off), so it is kept as it is.
-            const tooLong = attempt > 0 && have > planned * 1.1;
-            if (tooLong && text.length > 55000) break;
-            const need = attempt === 0 ? planned : (tooLong ? planned : Math.max(300, planned - have));
-            setStatus(`${tooLong ? 'Shortening' : 'Transforming'} “${s.title}”: ${have} of ${planned} words so far…`);
-            const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(secWorks), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing: text, approach: cur.approach || '' };
-            const d = await apiPostForm(WRITE_PATH, params);
-            if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be transformed.'); break; }
-            if (!String(d.text || '').trim()) break;
-            // The first draft, and a shortened draft, replace the text. A continuation is added to it.
-            text = (attempt === 0 || tooLong) ? d.text : text + '\n\n' + d.text;
-            (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
-            out[s.id] = { text: trTrimForeign(text, s.id), references: refs };
-            saveJob({ sections: out });
-          }
+          // The writer is asked again to shorten a draft that is too long, or to continue one that is too short.
+          const fit = await PL2.fitSection(planned, async ({ words: need, existing, tooLong }) => {
+            setStatus(`${tooLong ? 'Shortening' : (existing ? 'Continuing' : 'Transforming')} “${s.title}”: ${wordCount(existing)} of ${planned} words so far…`);
+            const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(secWorks), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing, approach: cur.approach || '' };
+            return apiPostForm(WRITE_PATH, params);
+          }, { onStep: (txt, rs) => { out[s.id] = { text: trTrimForeign(txt, s.id), references: rs }; saveJob({ sections: out }); } });
+          const text = fit.text;
+          out[s.id] = { text: trTrimForeign(text, s.id), references: fit.references };
+          saveJob({ sections: out });
           prior.push({ title: s.title, text });
         } catch (e) {
           setStatus(`Stopped at “${s.title}”: ${e.message}`);
