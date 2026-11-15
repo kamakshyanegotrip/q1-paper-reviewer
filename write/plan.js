@@ -257,7 +257,51 @@
     ];
     return lines.join('\n');
   }
-  const api = { APPROACH_BRIEF, buildTransformPrompt, buildSetParagraphPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
+  // The length to aim for in section i: its plan, scaled so the words still to come fill what the target has left
+  // after the sections already written. Keeps the whole article near the target, not just each section.
+  function aimFor(plans, i, doneWords, target) {
+    const remainingPlanned = plans.slice(i).reduce((a, b) => a + b, 0) || 1;
+    const left = Math.max(0, Number(target) - doneWords);
+    const scale = Math.min(1.5, Math.max(0.5, left / remainingPlanned));
+    return Math.round(plans[i] * scale);
+  }
+
+  // Fits one transformed section to its planned length. requestDraft({ words, existing, tooLong }) asks the writer
+  // and returns { ok, text, references, reason }. A draft over the plan is shortened and replaced; a draft under it is
+  // continued. Stops when the section is within 10% of the plan, after maxAttempts, or when it cannot be shortened safely.
+  // onStep(text, references) is called after each writer reply, so progress can be saved.
+  async function fitSection(planned, requestDraft, { maxAttempts = 8, onStep = () => {}, maxShortenChars = 55000 } = {}) {
+    let text = '';
+    const references = [];
+    let status = 'short';
+    let attempts = 0;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const have = countWords(text);
+      if (attempt > 0 && have >= planned * 0.9 && have <= planned * 1.1) { status = 'ok'; break; }
+      const tooLong = attempt > 0 && have > planned * 1.1;
+      if (tooLong && text.length > maxShortenChars) { status = 'long'; break; }
+      // A shortened draft is asked for the planned length itself, so it lands near the middle of the band; a
+      // continuation asks only for what is missing.
+      const words = attempt === 0 ? planned
+        : tooLong ? planned
+        : Math.max(Math.round(planned * 0.1), planned - have);
+      attempts++;
+      const d = await requestDraft({ words, existing: text, tooLong });
+      if (!d || !d.ok) {
+        if (!text) throw new Error((d && d.reason) || 'The section could not be transformed.');
+        break;
+      }
+      if (!String(d.text || '').trim()) break;
+      text = (attempt === 0 || tooLong) ? d.text : text + '\n\n' + d.text;
+      (d.references || []).forEach(r => { if (!references.some(q => q.text === r.text)) references.push(r); });
+      const now = countWords(text);
+      status = now > planned * 1.1 ? 'long' : (now < planned * 0.9 ? 'short' : 'ok');
+      onStep(text, references);
+    }
+    return { text, references, status, attempts, words: countWords(text) };
+  }
+
+  const api = { aimFor, fitSection, APPROACH_BRIEF, buildTransformPrompt, buildSetParagraphPrompt, buildOutline, dependsOn, sectionStatus, lengthCheck, countWords, buildSectionPrompt, buildRevisePrompt, paragraphBudgets, outlineOf, buildParagraphPrompt, REVISE_MODES, MODIFICATIONS, INPUT_LABELS, TOLERANCE };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Q1Plan = api;
 })(typeof window !== 'undefined' ? window : globalThis);
