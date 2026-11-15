@@ -1352,6 +1352,7 @@
     const reqTotal = secs.reduce((n, s) => n + reqWords(s), 0);
     const reqPlanned = s => outline.sections.find(x => x.id === s.id).words;
     const reqShort = secs.filter(s => reqWords(s) > 0 && reqWords(s) < reqPlanned(s) * 0.85);
+    const reqLong = secs.filter(s => reqWords(s) > reqPlanned(s) * 1.15);
     const reqAllText = secs.map(s => (done[s.id] || {}).text || '').join('\n');
     const reqTables = (reqAllText.match(/^\s*\|\s*:?-{3,}/gm) || []).length;
     const reqCites = (reqAllText.match(/\{\{cite:/g) || []).length;
@@ -1362,7 +1363,7 @@
         <div style="font-weight:600;margin-bottom:4px">Step 4 · Check requirements</div>
         <ul style="margin:0;padding-left:18px;font-size:14px">
           ${reqRow(reqTotal >= reqTarget * 0.85 && reqTotal <= reqTarget * 1.15, 'Total length', `${reqTotal} words against a target of ${reqTarget}`)}
-          ${reqRow(reqShort.length === 0, 'Sections', reqShort.length ? `${reqShort.length} below 85% of planned length: ${reqShort.map(s => s.title).join(', ')}` : 'all sections at planned length')}
+          ${reqRow(reqShort.length === 0 && reqLong.length === 0, 'Sections', [reqShort.length ? `${reqShort.length} below 85% of planned length: ${reqShort.map(s => s.title).join(', ')}` : '', reqLong.length ? `${reqLong.length} above 115% of planned length: ${reqLong.map(s => s.title).join(', ')}` : ''].filter(Boolean).join('; ') || 'all sections at planned length')}
           ${reqRow(reqCites === 0, 'Unresolved citations', reqCites ? `${reqCites} {{cite:}} markers still in the text` : 'none')}
           ${reqRow(reqRefs > 0, 'References', `${reqRefs} in the reference list`)}
           ${reqRow(reqPicked > 0, 'Literature used', reqPicked ? `${reqPicked} works ticked for the update` : 'no works ticked; tick sources in Step 2 and update')}
