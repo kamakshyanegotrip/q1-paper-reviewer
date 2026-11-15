@@ -142,3 +142,18 @@ test('a transform keeps the article in-text citations even when no new sources a
   assert.match(p, /Add no new citations/);
   assert.doesNotMatch(p, /Write no \{\{cite:…\}\} markers at all/);
 });
+
+test('transform shortens a section that is longer than its target and does not send the source', () => {
+  const long = Array.from({ length: 1200 }, (_, i) => 'word' + i).join(' ');
+  const p = P.buildTransformPrompt({ type: 'book:authored', section: 'chapter_1', words: 500, source: 'SOURCE TEXT', prior: [], sourcesText: '', project: {}, existing: long });
+  assert.match(p, /Shorten it to about 500 words/);
+  assert.doesNotMatch(p, /words short of the target/);
+  assert.doesNotMatch(p, /SOURCE TEXT/);
+});
+
+test('transform still continues a section that is shorter than its target', () => {
+  const short = 'Only a few words here.';
+  const p = P.buildTransformPrompt({ type: 'book:authored', section: 'chapter_1', words: 500, source: 'SOURCE TEXT', prior: [], sourcesText: '', project: {}, existing: short });
+  assert.match(p, /words short of the target/);
+  assert.match(p, /SOURCE TEXT/);
+});

@@ -1585,14 +1585,19 @@
           }
           for (let attempt = 0; attempt < 6; attempt++) {
             const have = wordCount(text);
-            if (attempt > 0 && have >= planned * 0.85) break;
-            const need = attempt === 0 ? planned : Math.max(300, planned - have);
-            setStatus(`Transforming “${s.title}”: ${have} of ${planned} words so far…`);
+            // Done when the section is within 10% of its planned length.
+            if (attempt > 0 && have >= planned * 0.9 && have <= planned * 1.1) break;
+            // Too long: shorten the section and replace it. Too short: continue it. A section over 55,000 characters is not sent for shortening (it would be cut off), so it is kept as it is.
+            const tooLong = attempt > 0 && have > planned * 1.1;
+            if (tooLong && text.length > 55000) break;
+            const need = attempt === 0 ? planned : (tooLong ? planned : Math.max(300, planned - have));
+            setStatus(`${tooLong ? 'Shortening' : 'Transforming'} “${s.title}”: ${have} of ${planned} words so far…`);
             const params = { action: 'transform', type: t, section: s.id, words: need, source: cur.source, works: JSON.stringify(secWorks), style, project: JSON.stringify({ title: cur.title || '' }), prior: JSON.stringify(prior), existing: text, approach: cur.approach || '' };
             const d = await apiPostForm(WRITE_PATH, params);
             if (!d.ok) { if (!text) throw new Error(d.reason || 'The section could not be transformed.'); break; }
             if (!String(d.text || '').trim()) break;
-            text = attempt === 0 ? d.text : text + '\n\n' + d.text;
+            // The first draft, and a shortened draft, replace the text. A continuation is added to it.
+            text = (attempt === 0 || tooLong) ? d.text : text + '\n\n' + d.text;
             (d.references || []).forEach(r => { if (!refs.some(q => q.text === r.text)) refs.push(r); });
             out[s.id] = { text: trTrimForeign(text, s.id), references: refs };
             saveJob({ sections: out });
